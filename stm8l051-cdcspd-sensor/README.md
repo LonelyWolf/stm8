@@ -1,0 +1,1 @@
+RF Speed/Cadence sensor based on STM8L051 + nRF24L01

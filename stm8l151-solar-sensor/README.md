@@ -1,0 +1,1 @@
+Solar powered STM8L151 + nRF24L01 + LM75
