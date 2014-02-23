@@ -1,0 +1,17 @@
+# Compiled binaries
+*.bin
+*.elf
+*.hex
+*.map
+
+# Trash
+*.bak
+
+# IAR project "Debug" directory
+Debug/
+
+# IAR project "Release" directory
+Release/
+
+# IAR project settings directory
+settings/
