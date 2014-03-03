@@ -13,9 +13,12 @@
 
 
 #define DEBUG
-#define SOFT_DEBOUNCE
+#define SOFT_DEBOUNCE     // If defined - use software debounce, no debounce otherwise
 
-#define TX_PAYLOAD           18
+#define TIM2LSE           // If defined - TIM2 will be clocked from LSE
+#define TIM3LSE           // If defined - TIM3 will be clocked from LSE
+
+#define TX_PAYLOAD    13  // nRF24L01 Payload length
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -25,10 +28,9 @@ uint8_t i;
 
 uint16_t vrefint;
 uint16_t factory_vref;
-uint16_t vrefint;
 
-uint8_t cntr_EXTI1;
-uint8_t cntr_EXTI2;
+uint16_t cntr_EXTI1 = 0;  // EXTI1 impulse counter
+uint16_t cntr_EXTI2 = 0;  // EXTI2 impulse counter
 
 volatile uint16_t tim2_diff = 0;
 volatile uint16_t tim3_diff = 0;
@@ -41,6 +43,10 @@ float spd_f, spd_i;
 uint32_t cdc;
 
 uint8_t buf[TX_PAYLOAD]; // nRF24L01 payload buffer
+
+uint8_t prev_observe_TX = 0; // Last value of nRF24L01 OBSERVE_TX register
+
+uint16_t cntr_wake = 0; // Wakeup counter (for debug purposes)
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -214,6 +220,15 @@ int main( void )
         UART_SendStr("ok\n");
     }
     nRF24_TXMode(); // Configure nRF24L01 for TX mode
+
+    UART_SendStr("nRF24:");
+    i = nRF24_TXPacket(buf,TX_PAYLOAD);
+    UART_SendHex8(i);
+    prev_observe_TX = nRF24_ReadReg(nRF24_REG_OBSERVE_TX);
+    UART_SendStr("   OTX:");
+    UART_SendHex8(prev_observe_TX);
+    UART_SendChar('\n');
+
     nRF24_PowerDown(); // Put nRF24L01 into power down mode
     for (i = 0; i < TX_PAYLOAD; i++) buf[i] = 0x00;
 
@@ -241,6 +256,17 @@ int main( void )
     UART_SendChars('-',80); UART_SendChar('\n');
 
     // Timers initialization
+#ifdef TIM2LSE
+    CLK_PCKENR1_bit.PCKEN10 = 1; // Enable TIM2 peripherial
+    SYSCFG_RMPCR2_bit.TIM2TRIGLSE_REMAP = 1; // TIM2 trigger controlled by LSE (OSC32_IN)
+    TIM2_PSCR = 0; // Prescaler is off
+    TIM2_ARRH = 0x00; // Auto-reload value (32768 / 33 -> 0.9929696969)
+    TIM2_ARRL = 0x20;
+    TIM2_ETR = 0x40; // External trigger: enabled, non-inverted, prescaler off, filter off
+    TIM2_IER_bit.UIE = 1; // Update interrupt enable
+    //TIM2_CR1_bit.CEN = 1; // Enable TIM2 counter
+    TIM2_EGR_bit.UG = 1; // Generate UEV (update event) to reload TIM2 and set the prescaler
+#else
     CLK_PCKENR1_bit.PCKEN10 = 1; // Enable TIM2 peripherial
     TIM2_PSCR = 4; // Prescaler is 16
     TIM2_ARRH = 0; // Auto-reload value (TIM2 overflow in 1.0008ms at 2MHz)
@@ -248,7 +274,19 @@ int main( void )
     TIM2_IER_bit.UIE = 1; // Update interrupt enable
     //TIM2_CR1_bit.CEN = 1; // Enable TIM2 counter
     TIM2_EGR_bit.UG = 1; // Generate UEV (update event) to reload TIM2 and set the prescaler
+#endif
 
+#ifdef TIM3LSE
+    CLK_PCKENR1_bit.PCKEN11 = 1; // Enable TIM3 peripherial
+    SYSCFG_RMPCR2_bit.TIM3TRIGLSE_REMAP = 1; // TIM3 trigger controlled by LSE (OSC32_IN)
+    TIM3_PSCR = 0; // Prescaler is off
+    TIM3_ARRH = 0x00; // Auto-reload value (32768 / 33 -> 0.9929696969)
+    TIM3_ARRL = 0x20;
+    TIM3_ETR = 0x40; // External trigger: enabled, non-inverted, prescaler off, filter off
+    TIM3_IER_bit.UIE = 1; // Update interrupt enable
+    //TIM3_CR1_bit.CEN = 1; // Enable TIM3 counter
+    TIM3_EGR_bit.UG = 1; // Generate UEV (update event) to reload TIM3 and set the prescaler
+#else
     CLK_PCKENR1_bit.PCKEN11 = 1; // Enable TIM3 peripherial
     TIM3_PSCR = 4; // Prescaler is 16
     TIM3_ARRH = 0; // Auto-reload value (TIM3 overflow in 1.0008ms at 2MHz)
@@ -256,6 +294,7 @@ int main( void )
     TIM3_IER_bit.UIE = 1; // Update interrupt enable
     //TIM3_CR1_bit.CEN = 1; // Enable TIM3 counter
     TIM3_EGR_bit.UG = 1; // Generate UEV (update event) to reload TIM3 and set the prescaler
+#endif
 
     // Configure external interrupts
     CPU_CFG_GCR_bit.AL = 1; // Interrupt-only activation level (IRET causes the CPU to go back to Halt mode)
@@ -276,7 +315,12 @@ int main( void )
 
     // Main loop ^_^
     while(1) {
-        UART_SendStr("EXTI: ");
+        cntr_wake++; // Count wakeups for debug purposes
+
+        UART_SendStr("Wakeups: ");
+        UART_SendUInt(cntr_wake);
+
+        UART_SendStr("   EXTI: ");
         UART_SendUInt(cntr_EXTI1);
         UART_SendChar(':');
         UART_SendUInt(cntr_EXTI2);
@@ -287,13 +331,21 @@ int main( void )
         UART_SendUInt(tim3_diff);
 
         UART_SendStr("   SPD: ");
+#ifdef TIM2LSE
+        speed = 206.0 * (992.9696969 * 0.036) / tim2_diff;
+#else
         speed = (206.0 / (tim2_diff / 1008.0)) * 0.036;
+#endif
         spd_f = modff(speed, &spd_i);
         UART_SendUInt((uint32_t)spd_i);
         UART_SendChar('.');
         UART_SendUInt((uint32_t)(spd_f * 10));
         UART_SendChar(':');
+#ifdef TIM3LSE
+        speed = 206.0 * (992.9696969 * 0.036) / tim3_diff;
+#else
         speed = (206.0 / (tim3_diff / 1008.0)) * 0.036;
+#endif
         spd_f = modff(speed, &spd_i);
         UART_SendUInt((uint32_t)spd_i);
         UART_SendChar('.');
@@ -311,12 +363,39 @@ int main( void )
         UART_SendStr("   TIM3:");
         UART_SendStr(TIM3_CR1_bit.CEN ? "on" : "off");
 
+        // Measure supply voltage
+        if (cntr_wake % 25 == 0) {
+            CLK_PCKENR2_bit.PCKEN20 = 1; // Enable ADC peripherial (PCKEN20)
+            ADC_Vrefint_Init();
+            vrefint = ADC_Vrefint_Measure(5);
+            ADC_Vrefint_Disable();
+            CLK_PCKENR2_bit.PCKEN20 = 0; // Disable ADC peripherial
+            vrefint = (((uint32_t)factory_vref * 300) / vrefint);
+        }
+        UART_SendStr("   Vcc:");
+        UART_SendInt(vrefint / 100); UART_SendChar('.');
+        UART_SendInt(vrefint % 100); UART_SendChar('V');
+
+        buf[0]  = cntr_EXTI1 >> 8;
+        buf[1]  = cntr_EXTI1 & 0xff;
+        buf[2]  = cntr_EXTI2 >> 8;
+        buf[3]  = cntr_EXTI2 & 0xff;
+        buf[4]  = tim2_diff >> 8;
+        buf[5]  = tim2_diff & 0xff;
+        buf[6]  = tim3_diff >> 8;
+        buf[7]  = tim3_diff & 0xff;
+        buf[8]  = vrefint >> 8;
+        buf[9]  = vrefint & 0xff;
+        buf[10] = prev_observe_TX;
+        buf[11] = cntr_wake >> 8;
+        buf[12] = cntr_wake & 0xff;
+
         UART_SendStr("   nRF24:");
         i = nRF24_TXPacket(buf,TX_PAYLOAD);
         UART_SendHex8(i);
-        i = nRF24_ReadReg(nRF24_REG_OBSERVE_TX);
+        prev_observe_TX = nRF24_ReadReg(nRF24_REG_OBSERVE_TX);
         UART_SendStr("   OTX:");
-        UART_SendHex8(i);
+        UART_SendHex8(prev_observe_TX);
 
         UART_SendChar('\n');
 

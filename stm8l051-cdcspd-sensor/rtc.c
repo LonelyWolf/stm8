@@ -85,6 +85,7 @@ void RTC_TuneClock(const uint32_t LSI_freq) {
     uint16_t prediv_s;
     uint16_t cntr = 0;
 
+    while (CLK_CRTCR_bit.RTCSWBSY); // Wait for RTCSWBSY flag to clear
     CLK_CRTCR = 0xA4; // RTC clock: source LSI, RTCDIV = 32
     RTC_Unlock(); // Disable write protection of RTC registers
     RTC_ISR1_bit.INIT = 1; // Enter initialization mode
@@ -105,6 +106,7 @@ void RTC_TuneClock(const uint32_t LSI_freq) {
 void RTC_Init(void) {
     uint16_t cntr = 0;
 
+    while (CLK_CRTCR_bit.RTCSWBSY); // Wait for RTCSWBSY flag to clear
     CLK_CRTCR = 0xB0; // RTC clock: source LSE, RTCDIV = 32
     while (!CLK_ECKCR_bit.LSERDY); // Wait for LSE stabilization
     CLK_PCKENR2_bit.PCKEN22 = 1; // Enable RTC peripherial (PCKEN22)
