@@ -10,8 +10,8 @@ typedef enum {
 
 // nRF24L01 data rate
 typedef enum {
-    nRF24_DataRate_1Mbps = (uint8_t)0x08, // 1Mbps data rate
-    nRF24_DataRate_2Mbps = (uint8_t)0x00  // 2Mbps data rate
+    nRF24_DataRate_1Mbps = (uint8_t)0x00, // 1Mbps data rate
+    nRF24_DataRate_2Mbps = (uint8_t)0x08  // 2Mbps data rate
 } nRF24_DataRate_TypeDef;
 
 // nRF24L01 RF output power in TX mode
@@ -129,10 +129,11 @@ uint8_t nRF24_WriteBuf(uint8_t reg, uint8_t *pBuf, uint8_t count);
 
 uint8_t nRF24_Check(void);
 
+void nRF24_SetRFChannel(uint8_t RFChannel);
 void nRF24_RXMode(uint8_t RX_PAYLOAD);
 void nRF24_TXMode(uint8_t RetrCnt, uint8_t RetrDelay, uint8_t RFChan, nRF24_DataRate_TypeDef DataRate,
-                  nRF24_TXPower_TypeDef TXPower, nRF24_LNA_TypeDef LNA, nRF24_CRC_TypeDef CRC,
-                  nRF24_CRCO_TypeDef CRCO, nRF24_PWR_TypeDef PWR);
+                  nRF24_TXPower_TypeDef TXPower, nRF24_CRC_TypeDef CRC, nRF24_CRCO_TypeDef CRCO,
+                  nRF24_PWR_TypeDef PWR);
 uint8_t nRF24_TXPacket(uint8_t * pBuf, uint8_t TX_PAYLOAD);
 uint8_t nRF24_RXPacket(uint8_t* pBuf);
 void nRF24_PowerDown(void);

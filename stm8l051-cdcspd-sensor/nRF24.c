@@ -5,8 +5,8 @@
 #include "nRF24.h"
 
 
-uint8_t nRF24_RX_addr[nRF24_RX_ADDR_WIDTH] = {'W','o','l','k','T'};
-uint8_t nRF24_TX_addr[nRF24_TX_ADDR_WIDTH] = {'W','o','l','k','T'};
+uint8_t nRF24_RX_addr[nRF24_RX_ADDR_WIDTH] = {'W','o','l','k','S'};
+uint8_t nRF24_TX_addr[nRF24_TX_ADDR_WIDTH] = {'W','o','l','k','S'};
 
 
 // Check the specified SPI flag
@@ -170,6 +170,14 @@ uint8_t nRF24_Check(void) {
     return 0;
 }
 
+// Set nRF24L01 frequency channel
+// input:
+//   RFChannel - Frequency channel (0..127) (frequency = 2400 + RFChan [MHz])
+// Note, what part of the OBSERVER_TX register called "PLOS_CNT" will be cleared!
+void nRF24_SetRFChannel(uint8_t RFChannel) {
+    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_RF_CH,RFChannel);
+}
+
 // Put nRF24L01 in RX mode
 void nRF24_RXMode(uint8_t RX_PAYLOAD) {
     CE_L();
@@ -192,23 +200,21 @@ void nRF24_RXMode(uint8_t RX_PAYLOAD) {
 //   RFChan - Frequency channel (0..127) (frequency = 2400 + RFChan [MHz])
 //   DataRate - Set data rate: nRF24_DataRate_1Mbps or nRF24_DataRate_2Mbps
 //   TXPower - RF output power (-18dBm, -12dBm, -6dBm, 0dBm)
-//   LNA - LNA gain state (nRF24_NLA_on or nRF24_NLA_off)
 //   CRC - CRC state (nRF24_CRC_on or nRF24_CRC_off)
 //   CRCO - CRC encoding scheme (nRF24_CRC_1byte or nRF24_CRC_2byte)
 //   PWR - power state (nRF24_PWR_Up or nRF24_PWR_Down)
 void nRF24_TXMode(uint8_t RetrCnt, uint8_t RetrDelay, uint8_t RFChan, nRF24_DataRate_TypeDef DataRate,
-                  nRF24_TXPower_TypeDef TXPower, nRF24_LNA_TypeDef LNA, nRF24_CRC_TypeDef CRC,
-                  nRF24_CRCO_TypeDef CRCO, nRF24_PWR_TypeDef PWR) {
+                  nRF24_TXPower_TypeDef TXPower, nRF24_CRC_TypeDef CRC, nRF24_CRCO_TypeDef CRCO,
+                  nRF24_PWR_TypeDef PWR) {
     CE_L();
     nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_EN_AA,0x01); // Enable ShockBurst for data pipe 0
-//    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_SETUP_RETR,0x1A); // Auto retransmit: wait 500us, 10 retries
-//    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_RF_CH,0x6E); // Set frequency channel 110 (2.510MHz)
-//    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_RF_SETUP,0x06); // Setup: 1Mbps, 0dBm, LNA off
-//    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_CONFIG,0x0E); // Config: CRC on (2 bytes), Power UP, RX/TX ctl = PTX
-    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_SETUP_RETR,(RetrCnt & 0xf0) | (RetrDelay & 0x0f)); // Auto retransmit settings
+    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_SETUP_RETR,((RetrDelay << 4) & 0xf0) | RetrCnt & 0x0f); // Auto retransmit settings
     nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_RF_CH,RFChan); // Set frequency channel
-    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_RF_SETUP,(uint8_t)DataRate | (uint8_t)TXPower | (uint8_t)LNA); // Setup register
+    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_RF_SETUP,(uint8_t)DataRate | (uint8_t)TXPower); // Setup register
     nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_CONFIG,(uint8_t)CRC | (uint8_t)CRCO | (uint8_t)PWR | nRF24_PRIM_TX); // Config register
+    nRF24_SetRFChannel(RFChan); // Set frequency channel (OBSERVER_TX part PLOS_CNT will be cleared)
+    nRF24_WriteBuf(nRF24_CMD_WREG | nRF24_REG_TX_ADDR,nRF24_TX_addr,nRF24_TX_ADDR_WIDTH); // Set static TX address
+    nRF24_WriteBuf(nRF24_CMD_WREG | nRF24_REG_RX_ADDR_P0,nRF24_RX_addr,nRF24_RX_ADDR_WIDTH); // Set static RX address for auto ack
 }
 
 // Receive data packet
@@ -232,14 +238,7 @@ uint8_t nRF24_TXPacket(uint8_t * pBuf, uint8_t TX_PAYLOAD) {
     uint8_t status;
 
     CE_L();
-    nRF24_WriteBuf(nRF24_CMD_WREG | nRF24_REG_TX_ADDR,nRF24_TX_addr,nRF24_TX_ADDR_WIDTH); // Set static TX address
-    nRF24_WriteBuf(nRF24_CMD_WREG | nRF24_REG_RX_ADDR_P0,nRF24_RX_addr,nRF24_RX_ADDR_WIDTH); // Set static RX address for auto ack
-    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_EN_AA,0x01); // Enable auto acknowledgement for data pipe 0
-    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_SETUP_RETR,0x1A); // Automatic retransmission: wait 500us, 10 retries
-    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_RF_CH,0x6E); // Set frequency channel 110 (2.510MHz)
-    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_RF_SETUP,0x07); // Setup: 1Mbps, 0dBm, LNA on
     nRF24_WriteBuf(nRF24_CMD_W_TX_PAYLOAD,pBuf,TX_PAYLOAD); // Write specified buffer to FIFO
-    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_CONFIG,0x0E); // Config: CRC on (2 bytes), Power UP, RX/TX ctl = PTX
     CE_H(); // CE pin high => Start transmit
     // Delay_us(10); // Must hold CE at least 10us
     while(PC_IDR_bit.IDR0 != 0); // Wait for IRQ from nRF24L01
@@ -275,8 +274,7 @@ void nRF24_PowerDown(void) {
 void nRF24_Wake(void) {
     uint8_t conf;
 
-    conf = nRF24_ReadReg(nRF24_REG_CONFIG);
-    conf |= (1<<1); // Set PWR_UP bit
+    conf = nRF24_ReadReg(nRF24_REG_CONFIG) | (1<<1); // Set PWR_UP bit
     nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_CONFIG,conf); // Wakeup
     // Delay_ms(2); // Wakeup from Power Down to Standby-I mode takes 1.5ms
 }

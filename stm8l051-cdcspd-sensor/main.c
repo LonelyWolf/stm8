@@ -3,10 +3,12 @@
 //////////////////////////
 
 
-//#define DEBUG
+//#define DEBUG             // CPU clock 2MHz, UART spam, Speed/Cadence calculating
 #define SOFT_DEBOUNCE     // If defined - use software debounce, no debounce otherwise
 
+
 ///////////////////////////////////////////////////////////////////////////////
+
 
 #include "stdint.h"
 #include "iostm8l051f3.h"
@@ -19,12 +21,15 @@
 #include "nRF24.h"
 #include "rtc.h"
 
+
 ///////////////////////////////////////////////////////////////////////////////
+
 
 #define TIM2LSE           // If defined - TIM2 will be clocked from LSE
 #define TIM3LSE           // If defined - TIM3 will be clocked from LSE
 
 #define TX_PAYLOAD    13  // nRF24L01 Payload length
+#define RF_CHANNEL    90  // nRF24L01 channel (90ch = 2490MHz)
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -59,7 +64,7 @@ uint16_t cntr_wake = 0; // Wakeup counter (for debug purposes)
 
 // RTC_WAKEUP IRQ handle
 #pragma vector=RTC_WAKEUP_vector
-__ramfunc __interrupt void RTC_IRQHandler(void) {
+__interrupt void RTC_IRQHandler(void) {
     CPU_CFG_GCR_bit.AL = 0; // Set main activation level
     RTC_ISR2_bit.WUTF = 0; // Clear wakeup timer interrupt flag
 }
@@ -121,7 +126,7 @@ __interrupt void EXTI2_IRQHandler(void) {
 
 // TIM2 Update/Overflow/Trigger/Break interrupt IRQ handle
 #pragma vector=TIM2_OVR_UIF_vector
-__ramfunc __interrupt void TIM2_UIF_IRQHandler(void) {
+__interrupt void TIM2_UIF_IRQHandler(void) {
     tim2++;
     if (tim2 > 6000) {
         TIM2_CR1_bit.CEN = 0; // Disable TIM2 counter
@@ -133,7 +138,7 @@ __ramfunc __interrupt void TIM2_UIF_IRQHandler(void) {
 
 // TIM3 Update/Overflow/Trigger/Break interrupt IRQ handle
 #pragma vector=TIM3_OVR_UIF_vector
-__ramfunc __interrupt void TIM3_UIF_IRQHandler(void) {
+__interrupt void TIM3_UIF_IRQHandler(void) {
     tim3++;
     if (tim3 > 6000) {
         TIM3_CR1_bit.CEN = 0; // Disable TIM3 counter
@@ -148,7 +153,7 @@ __ramfunc __interrupt void TIM3_UIF_IRQHandler(void) {
 
 
 // Init Vreint ADC channel
-__ramfunc void ADC_Vrefint_Init(void) {
+void ADC_Vrefint_Init(void) {
     ADC1_CR1_bit.ADON = 1; // Enable ADC
     ADC1_TRIGR1_bit.VREFINTON = 1; // Enable internal reference voltage
     ADC1_SQR1_bit.CHSEL_S28 = 1; // Enable CHSEL_SVREFINT fast ADC channel
@@ -157,7 +162,7 @@ __ramfunc void ADC_Vrefint_Init(void) {
 }
 
 // Measure Vrefint
-__ramfunc uint16_t ADC_Vrefint_Measure(uint8_t count) {
+uint16_t ADC_Vrefint_Measure(uint8_t count) {
     uint16_t adc_res;
     uint16_t value = 0;
     uint8_t cntr;
@@ -175,7 +180,7 @@ __ramfunc uint16_t ADC_Vrefint_Measure(uint8_t count) {
 }
 
 // Disable Vrefint ADC channel and ADC module
-__ramfunc void ADC_Vrefint_Disable() {
+void ADC_Vrefint_Disable() {
     ADC1_TRIGR1_bit.VREFINTON = 0; // Disable internal reference voltage
     ADC1_SQR1_bit.CHSEL_S28 = 0; // Disable CHSEL_SVREFINT fast ADC channel
     ADC1_CR1_bit.ADON = 0; // Disable ADC
@@ -237,7 +242,7 @@ int main(void)
     // 10 retransmits with 500us delay
     // RF channel 90 (2490MHz), 1Mbps, -18dBm TX power, LNA gain enabled, 2-byte CRC
     // Power down mode initially
-    nRF24_TXMode(10,1,90,nRF24_DataRate_1Mbps,nRF24_TXPower_18dBm,nRF24_NLA_on,nRF24_CRC_on,nRF24_CRC_2byte,nRF24_PWR_Down);
+    nRF24_TXMode(10,1,RF_CHANNEL,nRF24_DataRate_1Mbps,nRF24_TXPower_18dBm,nRF24_CRC_on,nRF24_CRC_2byte,nRF24_PWR_Down);
     for (i = 0; i < TX_PAYLOAD; i++) buf[i] = 0x00;
 
     // Configure RTC
@@ -331,6 +336,7 @@ int main(void)
 
     // Main loop ^_^
     while(1) {
+        nRF24_Wake(); // Wake nRF24L01 (Standby-I mode), this take about 1.5ms
         cntr_wake++; // Count wakeups for debug purposes
 
 #ifdef DEBUG
@@ -375,9 +381,9 @@ int main(void)
         cdc = (uint32_t)((60.0 / tim3_diff) * 1008.0);
         UART_SendUInt(cdc);
 
-        UART_SendStr("   TIM2:");
+        UART_SendStr("   TIM:");
         UART_SendStr(TIM2_CR1_bit.CEN ? "on" : "off");
-        UART_SendStr("   TIM3:");
+        UART_SendChar(':');
         UART_SendStr(TIM3_CR1_bit.CEN ? "on" : "off");
 #endif
 
@@ -411,8 +417,10 @@ int main(void)
         buf[11] = cntr_wake >> 8;
         buf[12] = cntr_wake & 0xff;
 
+        nRF24_SetRFChannel(RF_CHANNEL); // To clean "PLOS_CNT" part of the OBERVER_TX register
         i = nRF24_TXPacket(buf,TX_PAYLOAD);
         prev_observe_TX = nRF24_ReadReg(nRF24_REG_OBSERVE_TX);
+        nRF24_PowerDown();
 #ifdef DEBUG
         UART_SendStr("   nRF24:");
         UART_SendHex8(i);
@@ -425,20 +433,18 @@ int main(void)
 #ifdef DEBUG
             UART_SendStr("WFI\n");
 #endif
-            nRF24_PowerDown(); // Powerdown nRF24L01
             CPU_CFG_GCR_bit.AL = 1; // Set interrupt-only activation level
             asm("wfi"); // Wait mode
-            nRF24_Wake(); // Wake nRF24L01 (Standby-I mode), this take about 1.5ms
         } else {
 #ifdef DEBUG
             UART_SendStr("HALT\n");
 #endif
             RTC_WakeupIT(DISABLE); // Disable wakeup interrupt
             RTC_WakeupSet(DISABLE); // Disable wakeup timer
-            nRF24_PowerDown(); // Powerdown nRF24L01
+            CLK_PCKENR2_bit.PCKEN22 = 0; // Disable RTC peripherial
             CPU_CFG_GCR_bit.AL = 0; // Set main activation level
-            asm("halt"); // Active-Halt mode
-            nRF24_Wake(); // Wake nRF24L01 (Standby-I mode), this take about 1.5ms
+            asm("halt"); // Halt mode
+            CLK_PCKENR2_bit.PCKEN22 = 1; // Enable RTC peripherial
         }
     }
 }
