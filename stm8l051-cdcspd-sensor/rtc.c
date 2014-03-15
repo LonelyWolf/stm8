@@ -8,7 +8,7 @@
 uint32_t CLK_GetClockFreq(void) {
     uint32_t src_freq;
     uint8_t clocksource = CLK_SCSR;
-    const uint8_t SYSDivFactor[5] = { 1, 2, 4, 8, 16 };
+    const uint8_t SYSDivFactor[8] = { 1, 2, 4, 8, 16, 32, 64, 128 };
 
     if ( clocksource == 0x01) { // CLK_SYSCLKSource_HSI
         src_freq = 16000000; // HSI_VALUE = 16MHz
