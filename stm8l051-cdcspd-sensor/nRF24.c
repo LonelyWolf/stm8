@@ -185,13 +185,30 @@ void nRF24_RXMode(uint8_t RX_PAYLOAD) {
 }
 
 // Put nRF24L01 in TX mode
-void nRF24_TXMode(void) {
+// input:
+//
+//   RetrCnt - Auto retransmit count on fail of AA (1..15 or 0 for disable)
+//   RetrDelay - Auto retransmit delay 250us+(0..15)*250us (0 = 250us, 15 = 4000us)
+//   RFChan - Frequency channel (0..127) (frequency = 2400 + RFChan [MHz])
+//   DataRate - Set data rate: nRF24_DataRate_1Mbps or nRF24_DataRate_2Mbps
+//   TXPower - RF output power (-18dBm, -12dBm, -6dBm, 0dBm)
+//   LNA - LNA gain state (nRF24_NLA_on or nRF24_NLA_off)
+//   CRC - CRC state (nRF24_CRC_on or nRF24_CRC_off)
+//   CRCO - CRC encoding scheme (nRF24_CRC_1byte or nRF24_CRC_2byte)
+//   PWR - power state (nRF24_PWR_Up or nRF24_PWR_Down)
+void nRF24_TXMode(uint8_t RetrCnt, uint8_t RetrDelay, uint8_t RFChan, nRF24_DataRate_TypeDef DataRate,
+                  nRF24_TXPower_TypeDef TXPower, nRF24_LNA_TypeDef LNA, nRF24_CRC_TypeDef CRC,
+                  nRF24_CRCO_TypeDef CRCO, nRF24_PWR_TypeDef PWR) {
     CE_L();
     nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_EN_AA,0x01); // Enable ShockBurst for data pipe 0
-    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_SETUP_RETR,0x1A); // Auto retransmit: wait 500us, 10 retries
-    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_RF_CH,0x6E); // Set frequency channel 110 (2.510MHz)
-    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_RF_SETUP,0x06); // Setup: 1Mbps, 0dBm, LNA off
-    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_CONFIG,0x0E); // Config: CRC on (2 bytes), Power UP, RX/TX ctl = PTX
+//    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_SETUP_RETR,0x1A); // Auto retransmit: wait 500us, 10 retries
+//    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_RF_CH,0x6E); // Set frequency channel 110 (2.510MHz)
+//    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_RF_SETUP,0x06); // Setup: 1Mbps, 0dBm, LNA off
+//    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_CONFIG,0x0E); // Config: CRC on (2 bytes), Power UP, RX/TX ctl = PTX
+    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_SETUP_RETR,(RetrCnt & 0xf0) | (RetrDelay & 0x0f)); // Auto retransmit settings
+    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_RF_CH,RFChan); // Set frequency channel
+    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_RF_SETUP,(uint8_t)DataRate | (uint8_t)TXPower | (uint8_t)LNA); // Setup register
+    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_CONFIG,(uint8_t)CRC | (uint8_t)CRCO | (uint8_t)PWR | nRF24_PRIM_TX); // Config register
 }
 
 // Receive data packet

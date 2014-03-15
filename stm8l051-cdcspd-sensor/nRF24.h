@@ -1,11 +1,56 @@
+// SPI flags (from stdperiph)
 typedef enum {
-  SPI_FLAG_BSY    = (uint8_t)0x80, // Busy flag
-  SPI_FLAG_OVR    = (uint8_t)0x40, // Overrun flag
-  SPI_FLAG_MODF   = (uint8_t)0x20, // Mode fault
-  SPI_FLAG_WKUP   = (uint8_t)0x08, // Wake-up flag
-  SPI_FLAG_TXE    = (uint8_t)0x02, // Transmit buffer empty
-  SPI_FLAG_RXNE   = (uint8_t)0x01  // Receive buffer empty
+    SPI_FLAG_BSY    = (uint8_t)0x80, // Busy flag
+    SPI_FLAG_OVR    = (uint8_t)0x40, // Overrun flag
+    SPI_FLAG_MODF   = (uint8_t)0x20, // Mode fault
+    SPI_FLAG_WKUP   = (uint8_t)0x08, // Wake-up flag
+    SPI_FLAG_TXE    = (uint8_t)0x02, // Transmit buffer empty
+    SPI_FLAG_RXNE   = (uint8_t)0x01  // Receive buffer empty
 } SPI_FLAG_TypeDef;
+
+// nRF24L01 data rate
+typedef enum {
+    nRF24_DataRate_1Mbps = (uint8_t)0x08, // 1Mbps data rate
+    nRF24_DataRate_2Mbps = (uint8_t)0x00  // 2Mbps data rate
+} nRF24_DataRate_TypeDef;
+
+// nRF24L01 RF output power in TX mode
+typedef enum {
+    nRF24_TXPower_18dBm = (uint8_t)0x00, // -18dBm
+    nRF24_TXPower_12dBm = (uint8_t)0x02, // -12dBm
+    nRF24_TXPower_6dBm  = (uint8_t)0x04, //  -6dBm
+    nRF24_TXPower_0dBm  = (uint8_t)0x06  //   0dBm
+} nRF24_TXPower_TypeDef;
+
+// nRF24L01 setup LNA gain
+typedef enum {
+    nRF24_NLA_on  = (uint8_t)0x01, // LNA gain enabled
+    nRF24_NLA_off = (uint8_t)0x00  // LNA gain disabled
+} nRF24_LNA_TypeDef;
+
+// nRF24L01 enable CRC
+typedef enum {
+    nRF24_CRC_on  = (uint8_t)0x08, // CRC enabled
+    nRF24_CRC_off = (uint8_t)0x00  // CRC disabled
+} nRF24_CRC_TypeDef;
+
+// nRF24L01 CRC encoding scheme
+typedef enum {
+    nRF24_CRC_1byte = (uint8_t)0x00, // 1-byte CRC
+    nRF24_CRC_2byte = (uint8_t)0x04  // 2-byte CRC
+} nRF24_CRCO_TypeDef;
+
+// nRF24L01 power control
+typedef enum {
+    nRF24_PWR_Up   = (uint8_t)0x02, // Power up
+    nRF24_PWR_Down = (uint8_t)0x00  // Power down
+} nRF24_PWR_TypeDef;
+
+// nRF24L01 RX/TX control
+typedef enum {
+    nRF24_PRIM_RX = (uint8_t)0x01, // PRX
+    nRF24_PRIM_TX = (uint8_t)0x00  // PTX
+} nRF24_PRIM_TypeDef;
 
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -85,7 +130,9 @@ uint8_t nRF24_WriteBuf(uint8_t reg, uint8_t *pBuf, uint8_t count);
 uint8_t nRF24_Check(void);
 
 void nRF24_RXMode(uint8_t RX_PAYLOAD);
-void nRF24_TXMode(void);
+void nRF24_TXMode(uint8_t RetrCnt, uint8_t RetrDelay, uint8_t RFChan, nRF24_DataRate_TypeDef DataRate,
+                  nRF24_TXPower_TypeDef TXPower, nRF24_LNA_TypeDef LNA, nRF24_CRC_TypeDef CRC,
+                  nRF24_CRCO_TypeDef CRCO, nRF24_PWR_TypeDef PWR);
 uint8_t nRF24_TXPacket(uint8_t * pBuf, uint8_t TX_PAYLOAD);
 uint8_t nRF24_RXPacket(uint8_t* pBuf);
 void nRF24_PowerDown(void);
