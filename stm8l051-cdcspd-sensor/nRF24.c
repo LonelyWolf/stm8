@@ -217,16 +217,6 @@ void nRF24_TXMode(uint8_t RetrCnt, uint8_t RetrDelay, uint8_t RFChan, nRF24_Data
     nRF24_WriteBuf(nRF24_CMD_WREG | nRF24_REG_RX_ADDR_P0,nRF24_RX_addr,nRF24_RX_ADDR_WIDTH); // Set static RX address for auto ack
 }
 
-// Receive data packet
-// input:
-//   pBuf - buffer for received data
-// return:
-//   0 if no data received and nonzero otherwise
-uint8_t nRF24_RXPacket(uint8_t* pBuf) {
-
-    return 0;
-}
-
 // Send data packet
 // input:
 //   pBuf - buffer with data to send
@@ -265,7 +255,7 @@ void nRF24_PowerDown(void) {
     uint8_t conf;
 
     CE_L(); // CE pin to low
-    conf = nRF24_ReadReg(nRF24_REG_CONFIG);
+    conf  = nRF24_ReadReg(nRF24_REG_CONFIG);
     conf &= ~(1<<1); // Clear PWR_UP bit
     nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_CONFIG,conf); // Go Power down mode
 }
@@ -277,4 +267,15 @@ void nRF24_Wake(void) {
     conf = nRF24_ReadReg(nRF24_REG_CONFIG) | (1<<1); // Set PWR_UP bit
     nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_CONFIG,conf); // Wakeup
     // Delay_ms(2); // Wakeup from Power Down to Standby-I mode takes 1.5ms
+}
+
+// Configure RF output power in TX mode
+// input:
+//   TXPower - RF output power (-18dBm, -12dBm, -6dBm, 0dBm)
+void nRF24_SetTXPower(nRF24_TXPower_TypeDef TXPower) {
+    uint8_t rf_setup;
+
+    rf_setup  = nRF24_ReadReg(nRF24_REG_RF_SETUP);
+    rf_setup &= 0xf9; // Clear RF_PWR bits
+    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_RF_SETUP,rf_setup | (uint8_t)TXPower);
 }

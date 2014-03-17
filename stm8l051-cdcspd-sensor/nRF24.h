@@ -135,6 +135,6 @@ void nRF24_TXMode(uint8_t RetrCnt, uint8_t RetrDelay, uint8_t RFChan, nRF24_Data
                   nRF24_TXPower_TypeDef TXPower, nRF24_CRC_TypeDef CRC, nRF24_CRCO_TypeDef CRCO,
                   nRF24_PWR_TypeDef PWR);
 uint8_t nRF24_TXPacket(uint8_t * pBuf, uint8_t TX_PAYLOAD);
-uint8_t nRF24_RXPacket(uint8_t* pBuf);
 void nRF24_PowerDown(void);
 void nRF24_Wake(void);
+void nRF24_SetTXPower(nRF24_TXPower_TypeDef TXPower);
