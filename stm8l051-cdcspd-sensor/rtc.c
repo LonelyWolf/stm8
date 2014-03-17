@@ -162,7 +162,7 @@ void RTC_WakeupTimerSet(uint16_t timer_count) {
     uint16_t cntr = 0;
 
     RTC_Unlock(); // Disable write protection of RTC registers
-    old_CR2 = RTC_CR2;
+    old_CR2 = RTC_CR2; // Preserve value of the CR2 register for WUTE bit state
     RTC_CR2_bit.WUTE = 0; // WUTR* registers can be changed only when WUTE bit is reset
     // Poll WUTWF flag until it is set in RTC_ISR1 (with timeout for any case).
     // It takes around 2 RTCCLK clock cycles according to datasheet

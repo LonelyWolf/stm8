@@ -25,33 +25,48 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 
-#define TIM2LSE           // If defined - TIM2 will be clocked from LSE
-#define TIM3LSE           // If defined - TIM3 will be clocked from LSE
+#define TIM2LSE              // If defined - TIM2 will be clocked from LSE
+#define TIM3LSE              // If defined - TIM3 will be clocked from LSE
 
-#define TX_PAYLOAD    13  // nRF24L01 Payload length
-#define RF_CHANNEL    90  // nRF24L01 channel (90ch = 2490MHz)
+#define TX_PAYLOAD       16  // nRF24L01 Payload length
+#define RF_CHANNEL       90  // nRF24L01 channel (90ch = 2490MHz)
+#define RF_RETR          10  // nRF24L01 TX retransmit count (max 15)
+
+#define TIM_DEBOUNCE     60  // Debounce delay, higher value means lowest high speed can be measured.
+#define TIM_TIMEOUT    6000  // Magnetic reed impulse timeout (roughly measured in milliseconds)
+
+#define WU_TIMER         63  // Wakeup timer Period = (WU_TIMER + 1) * 0,015625 seconds (63 = 1 second)
+
 
 ///////////////////////////////////////////////////////////////////////////////
 
 
-uint8_t i;
+uint8_t i; // Really need to comment this?
 
-uint16_t vrefint;
-uint16_t factory_vref;
+uint16_t vrefint; // Last measured internal voltage
+uint16_t factory_vref; // Factory measured internal voltage with 3V external
 
-uint16_t cntr_EXTI1 = 0;  // EXTI1 impulse counter
-uint16_t cntr_EXTI2 = 0;  // EXTI2 impulse counter
+volatile uint16_t cntr_EXTI1 = 0;  // EXTI1 impulse counter
+volatile uint16_t cntr_EXTI2 = 0;  // EXTI2 impulse counter
 
-volatile uint16_t tim2_diff = 0;
-volatile uint16_t tim3_diff = 0;
+volatile uint16_t tim2_diff = 0; // TIM2 difference between two pulses on EXTI1
+volatile uint16_t tim3_diff = 0; // TIM3 difference between two pulses on EXTI2
 
-volatile uint16_t tim2 = 0;
-volatile uint16_t tim3 = 0;
+volatile uint16_t tim2 = 0; // TIM2 overflows counter
+volatile uint16_t tim3 = 0; // TIM3 overflows counter
+
+uint16_t packets_lost = 0; // Lost packets counter
+
+const nRF24_TXPower_TypeDef tx_rf_powers[4] = { nRF24_TXPower_18dBm,
+                                                nRF24_TXPower_12dBm,
+                                                nRF24_TXPower_6dBm,
+                                                nRF24_TXPower_0dBm };
+uint8_t tx_power = 0; // RF output power
 
 #ifdef DEBUG
-float speed;
-float spd_f, spd_i;
-uint32_t cdc;
+    float speed;
+    float spd_f, spd_i;
+    uint32_t cdc;
 #endif
 
 uint8_t buf[TX_PAYLOAD]; // nRF24L01 payload buffer
@@ -75,7 +90,7 @@ __interrupt void EXTI1_IRQHandler(void) {
     TIM2_CR1_bit.CEN = 1; // Enable TIM2 counter
 
 #ifdef SOFT_DEBOUNCE
-    if (tim2 > 60) {
+    if (tim2 > TIM_DEBOUNCE) {
         cntr_EXTI1++;
         if (cntr_EXTI1 > 1) tim2_diff = tim2;
         tim2 = 0;
@@ -89,10 +104,7 @@ __interrupt void EXTI1_IRQHandler(void) {
     TIM2_EGR_bit.UG = 1; // Reinitialize TIM2
 #endif
 
-    if (!RTC_CR2_bit.WUTE) {
-        RTC_WakeupIT(ENABLE); // Enable wakeup interrupt
-        RTC_WakeupSet(ENABLE); // Enable wakeup timer
-    }
+    if (!RTC_CR2_bit.WUTE) RTC_WakeupSet(ENABLE); // Enable wakeup timer
     EXTI_SR1_bit.P1F = 1; // Clear EXTI1 IRQ flag
 }
 
@@ -102,7 +114,7 @@ __interrupt void EXTI2_IRQHandler(void) {
     TIM3_CR1_bit.CEN = 1; // Enable TIM3 counter
 
 #ifdef SOFT_DEBOUNCE
-    if (tim3 > 60) {
+    if (tim3 > TIM_DEBOUNCE) {
         cntr_EXTI2++;
         if (cntr_EXTI2 > 1) tim3_diff = tim3;
 
@@ -117,10 +129,7 @@ __interrupt void EXTI2_IRQHandler(void) {
     TIM3_EGR_bit.UG = 1; // Reinitialize TIM3
 #endif
 
-    if (!RTC_CR2_bit.WUTE) {
-        RTC_WakeupIT(ENABLE); // Enable wakeup interrupt
-        RTC_WakeupSet(ENABLE); // Enable wakeup timer
-    }
+    if (!RTC_CR2_bit.WUTE) RTC_WakeupSet(ENABLE); // Enable wakeup timer
     EXTI_SR1_bit.P2F = 1; // Clear EXTI2 IRQ flag
 }
 
@@ -128,7 +137,7 @@ __interrupt void EXTI2_IRQHandler(void) {
 #pragma vector=TIM2_OVR_UIF_vector
 __interrupt void TIM2_UIF_IRQHandler(void) {
     tim2++;
-    if (tim2 > 6000) {
+    if (tim2 > TIM_TIMEOUT) {
         TIM2_CR1_bit.CEN = 0; // Disable TIM2 counter
         cntr_EXTI1 = 0;
         tim2_diff  = 0;
@@ -140,7 +149,7 @@ __interrupt void TIM2_UIF_IRQHandler(void) {
 #pragma vector=TIM3_OVR_UIF_vector
 __interrupt void TIM3_UIF_IRQHandler(void) {
     tim3++;
-    if (tim3 > 6000) {
+    if (tim3 > TIM_TIMEOUT) {
         TIM3_CR1_bit.CEN = 0; // Disable TIM3 counter
         cntr_EXTI2 = 0;
         tim3_diff  = 0;
@@ -167,6 +176,7 @@ uint16_t ADC_Vrefint_Measure(uint8_t count) {
     uint16_t value = 0;
     uint8_t cntr;
 
+    // Measure voltage "count" times and calculate rough average value
     for (cntr = 0; cntr < count - 1; cntr++) {
         ADC1_CR1_bit.START = 1; // Start ADC conversion, by software trigger
         while (!ADC1_SR_bit.EOC); // Wait for the conversion ends
@@ -194,16 +204,38 @@ int main(void)
 {
     CLK_PCKENR2_bit.PCKEN27 = 0; // Disable Boot ROM
 
+    // Configure unused GPIO ports as input with pull-up for powersaving
+    // PB0
+    PB_ODR_bit.ODR0 = 0; // Latch "0" in input register
+    PB_DDR_bit.DDR0 = 0; // Set as input
+    PB_CR1_bit.C10  = 1; // Input with Pull-up
+    PB_CR2_bit.C20  = 0; // External interrupt disabled
+    // PD0
+    PD_ODR_bit.ODR0 = 0; // Latch "0" in input register
+    PD_DDR_bit.DDR0 = 0; // Set as input
+    PD_CR1_bit.C10  = 1; // Input with Pull-up
+    PD_CR2_bit.C20  = 0; // External interrupt disabled
+    // PC1
+    PD_ODR_bit.ODR1 = 0; // Latch "0" in input register
+    PD_DDR_bit.DDR1 = 0; // Set as input
+    PD_CR1_bit.C11  = 1; // Input with Pull-up
+    PD_CR2_bit.C21  = 0; // External interrupt disabled
+    // PC4
+    PC_ODR_bit.ODR4 = 0; // Latch "0" in input register
+    PC_DDR_bit.DDR4 = 0; // Set as output
+    PC_CR1_bit.C14  = 1; // Input with Pull-up
+    PC_CR2_bit.C24  = 0; // External interrupt disabled
+
     // Magnetic reed inputs
     // PB1 = Reed#1
     // PB2 = Reed#2
-    PB_ODR_bit.ODR1 = 1; // Latch "1" in input register (is this really necessary?)
+    PB_ODR_bit.ODR1 = 1; // Latch "1" in input register
     PB_DDR_bit.DDR1 = 0; // Set PB1 as input
-    PB_CR1_bit.C11  = 1; // Pull-up (does it have sense here?)
+    PB_CR1_bit.C11  = 0; // Floating input (it requires an external pull-up resistor)
     PB_CR2_bit.C21  = 1; // Enable external interrupt
-    PB_ODR_bit.ODR2 = 1; // Latch "1" in input register (is this really necessary?)
+    PB_ODR_bit.ODR2 = 1; // Latch "1" in input register
     PB_DDR_bit.DDR2 = 0; // Set PB2 as input
-    PB_CR1_bit.C12  = 1; // Pull-up (does it have sense here?)
+    PB_CR1_bit.C12  = 0; // Floating input (it requires an external pull-up resistor)
     PB_CR2_bit.C22  = 1; // Enable external interrupt
 
 #ifdef DEBUG
@@ -239,23 +271,24 @@ int main(void)
     }
 #endif
     // Configure nRF24L01 for TX mode:
-    // 10 retransmits with 500us delay
-    // RF channel 90 (2490MHz), 1Mbps, -18dBm TX power, LNA gain enabled, 2-byte CRC
+    // RF_RETR retransmits with 500us delay
+    // RF channel 90 (2490MHz), -18dBm TX power, LNA gain enabled, 2-byte CRC
     // Power down mode initially
-    nRF24_TXMode(10,1,RF_CHANNEL,nRF24_DataRate_1Mbps,nRF24_TXPower_18dBm,nRF24_CRC_on,nRF24_CRC_2byte,nRF24_PWR_Down);
-    for (i = 0; i < TX_PAYLOAD; i++) buf[i] = 0x00;
+    // 1Mbps - gives 3dB better receiver sensitivity compared to 2Mbps
+    nRF24_TXMode(RF_RETR,1,RF_CHANNEL,nRF24_DataRate_1Mbps,nRF24_TXPower_18dBm,nRF24_CRC_on,nRF24_CRC_2byte,nRF24_PWR_Down);
+    for (i = 0; i < TX_PAYLOAD; i++) buf[i] = 0x00; // it's obvious :)
 
     // Configure RTC
 #ifdef DEBUG
     UART_SendStr("RTC init ... ");
-    RTC_Init(); // Init RTC (hardware reset only in power on sequence!)
+    RTC_Init();
     UART_SendStr("ok\n");
 #else
-    RTC_Init(); // Init RTC (hardware reset only in power on sequence!)
+    RTC_Init();
 #endif
-    RTC_WakeupConfig(RTC_WUC_RTCCLK_Div16); // RTC wakeup = LSE/RTCDIV/16
+    RTC_WakeupConfig(RTC_WUC_RTCCLK_Div16); // RTC wakeup clock = LSE/RTCDIV/16
 
-    // If VREFINT not set on factory, assign standard value
+    // If VREFINT is not set on factory, assign average standard value
     if (Factory_VREFINT != 0) {
         factory_vref = 0x0600 | (uint16_t)Factory_VREFINT;
     } else {
@@ -320,15 +353,15 @@ int main(void)
     asm("rim"); // Enable global interrupts (enable priorities)
 
     // Configure wakeup timer
-    RTC_WakeupTimerSet(63); // 1 second wakeup
-    RTC_WakeupIT(DISABLE); // Disable wakeup interrupt
+    RTC_WakeupTimerSet(WU_TIMER); // 1 second wakeup
+    RTC_WakeupIT(ENABLE); // Enable wakeup interrupt
     RTC_WakeupSet(DISABLE); // Disable wakeup timer
 
     // Configure system clock
 #ifdef DEBUG
     CLK_CKDIVR_bit.CKM = 0x03; // System clock source /8 (2MHz from HSI)
 #else
-    CLK_CKDIVR_bit.CKM = 0x07; // System clock source /8 (2MHz from HSI)
+    CLK_CKDIVR_bit.CKM = 0x07; // System clock source /128 (125kHz from HSI)
 #endif
 
     // Go deep sleep mode
@@ -336,7 +369,11 @@ int main(void)
 
     // Main loop ^_^
     while(1) {
-        nRF24_Wake(); // Wake nRF24L01 (Standby-I mode), this take about 1.5ms
+        // Wake nRF24L01 (Power Down -> Standby-I mode)
+        // This will take about 1.5ms with internal nRF24L01 oscillator or 150us with external.
+        // So here delay is not necessary since nRF24L01 uses external oscillator.
+        nRF24_Wake();
+
         cntr_wake++; // Count wakeups for debug purposes
 
 #ifdef DEBUG
@@ -381,7 +418,7 @@ int main(void)
         cdc = (uint32_t)((60.0 / tim3_diff) * 1008.0);
         UART_SendUInt(cdc);
 
-        UART_SendStr("   TIM:");
+        UART_SendStr("   TIM: ");
         UART_SendStr(TIM2_CR1_bit.CEN ? "on" : "off");
         UART_SendChar(':');
         UART_SendStr(TIM3_CR1_bit.CEN ? "on" : "off");
@@ -397,9 +434,10 @@ int main(void)
             vrefint = (((uint32_t)factory_vref * 300) / vrefint);
         }
 #ifdef DEBUG
-        UART_SendStr("   Vcc:");
+        UART_SendStr("   Vcc: ");
         UART_SendInt(vrefint / 100); UART_SendChar('.');
         UART_SendInt(vrefint % 100); UART_SendChar('V');
+        UART_SendChar('\n');
 #endif
 
         // Prepare data packet for nRF24L01
@@ -416,16 +454,33 @@ int main(void)
         buf[10] = prev_observe_TX;
         buf[11] = cntr_wake >> 8;
         buf[12] = cntr_wake & 0xff;
+        buf[13] = packets_lost >> 8;
+        buf[14] = packets_lost & 0xff;
+        buf[15] = tx_power;
 
-        nRF24_SetRFChannel(RF_CHANNEL); // To clean "PLOS_CNT" part of the OBERVER_TX register
+        nRF24_SetRFChannel(RF_CHANNEL); // Set RF channel to clean "PLOS_CNT" part of the OBERVER_TX register
         i = nRF24_TXPacket(buf,TX_PAYLOAD);
         prev_observe_TX = nRF24_ReadReg(nRF24_REG_OBSERVE_TX);
-        nRF24_PowerDown();
+        nRF24_PowerDown(); // Standby-I -> Power down
+
+        packets_lost += prev_observe_TX >> 4;
+
+        // Lame adaptive TX power: increase power if it was retransmissions and decrease otherwise
+        if ((prev_observe_TX & 0x0f) > 0) {
+            if (tx_power < 3) nRF24_SetTXPower(tx_rf_powers[tx_power++]);
+        } else {
+            if (tx_power > 0) nRF24_SetTXPower(tx_rf_powers[tx_power--]);
+        }
+
 #ifdef DEBUG
-        UART_SendStr("   nRF24:");
+        UART_SendStr("  nRF24: ");
         UART_SendHex8(i);
-        UART_SendStr("   OTX:");
+        UART_SendStr("   OTX: ");
         UART_SendHex8(prev_observe_TX);
+        UART_SendStr("   P.lost: ");
+        UART_SendInt(packets_lost);
+        UART_SendStr("   TXpwr: ");
+        UART_SendInt(tx_power);
         UART_SendChar('\n');
 #endif
 
@@ -439,12 +494,9 @@ int main(void)
 #ifdef DEBUG
             UART_SendStr("HALT\n");
 #endif
-            RTC_WakeupIT(DISABLE); // Disable wakeup interrupt
             RTC_WakeupSet(DISABLE); // Disable wakeup timer
-            CLK_PCKENR2_bit.PCKEN22 = 0; // Disable RTC peripherial
             CPU_CFG_GCR_bit.AL = 0; // Set main activation level
             asm("halt"); // Halt mode
-            CLK_PCKENR2_bit.PCKEN22 = 1; // Enable RTC peripherial
         }
     }
 }
