@@ -41,16 +41,26 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 
+// 2-pin Bi color LED connected to PA2 and PA3
+// Macros to switch colors and turn on/off
+#define LED_RED()   PA_ODR_bit.ODR2 = 0; PA_ODR_bit.ODR3 = 1;
+#define LED_GREEN() PA_ODR_bit.ODR2 = 1; PA_ODR_bit.ODR3 = 0;
+//#define LED_OFF()   PA_ODR_bit.ODR2 = 0; PA_ODR_bit.ODR3 = 0;
+#define LED_OFF()   PA_ODR &= 0xf3;
+
+///////////////////////////////////////////////////////////////////////////////
+
+
 uint8_t i; // Really need to comment this?
 
 uint16_t vrefint; // Last measured internal voltage
 uint16_t factory_vref; // Factory measured internal voltage with 3V external
 
+volatile uint16_t cntr_EXTI0 = 0;  // EXTI0 impulse counter
 volatile uint16_t cntr_EXTI1 = 0;  // EXTI1 impulse counter
-volatile uint16_t cntr_EXTI2 = 0;  // EXTI2 impulse counter
 
-volatile uint16_t tim2_diff = 0; // TIM2 difference between two pulses on EXTI1
-volatile uint16_t tim3_diff = 0; // TIM3 difference between two pulses on EXTI2
+volatile uint16_t tim2_diff = 0; // TIM2 difference between two pulses on EXTI0
+volatile uint16_t tim3_diff = 0; // TIM3 difference between two pulses on EXTI1
 
 volatile uint16_t tim2 = 0; // TIM2 overflows counter
 volatile uint16_t tim3 = 0; // TIM3 overflows counter
@@ -84,53 +94,53 @@ __interrupt void RTC_IRQHandler(void) {
     RTC_ISR2_bit.WUTF = 0; // Clear wakeup timer interrupt flag
 }
 
-// EXTI1 IRQ handle
-#pragma vector=EXTI1_vector
-__interrupt void EXTI1_IRQHandler(void) {
+// EXTI0 IRQ handle
+#pragma vector=EXTI0_vector
+__interrupt void EXTI0_IRQHandler(void) {
     TIM2_CR1_bit.CEN = 1; // Enable TIM2 counter
 
 #ifdef SOFT_DEBOUNCE
     if (tim2 > TIM_DEBOUNCE) {
-        cntr_EXTI1++;
-        if (cntr_EXTI1 > 1) tim2_diff = tim2;
+        cntr_EXTI0++;
+        if (cntr_EXTI0 > 1) tim2_diff = tim2;
         tim2 = 0;
         TIM2_EGR_bit.UG = 1; // Reinitialize TIM2
     }
 #else
-    cntr_EXTI1++;
-    if (cntr_EXTI1 > 1) tim2_diff = tim2;
+    cntr_EXTI0++;
+    if (cntr_EXTI0 > 1) tim2_diff = tim2;
 
     tim2 = 0;
     TIM2_EGR_bit.UG = 1; // Reinitialize TIM2
 #endif
 
     if (!RTC_CR2_bit.WUTE) RTC_WakeupSet(ENABLE); // Enable wakeup timer
-    EXTI_SR1_bit.P1F = 1; // Clear EXTI1 IRQ flag
+    EXTI_SR1_bit.P0F = 1; // Clear EXTI0 IRQ flag
 }
 
-// EXTI2 IRQ handle
-#pragma vector=EXTI2_vector
-__interrupt void EXTI2_IRQHandler(void) {
+// EXTI1 IRQ handle
+#pragma vector=EXTI1_vector
+__interrupt void EXTI1_IRQHandler(void) {
     TIM3_CR1_bit.CEN = 1; // Enable TIM3 counter
 
 #ifdef SOFT_DEBOUNCE
     if (tim3 > TIM_DEBOUNCE) {
-        cntr_EXTI2++;
-        if (cntr_EXTI2 > 1) tim3_diff = tim3;
+        cntr_EXTI1++;
+        if (cntr_EXTI1 > 1) tim3_diff = tim3;
 
         tim3 = 0;
         TIM3_EGR_bit.UG = 1; // Reinitialize TIM3
     }
 #else
-    cntr_EXTI2++;
-    if (cntr_EXTI2 > 1) tim3_diff = tim3;
+    cntr_EXTI1++;
+    if (cntr_EXTI1 > 1) tim3_diff = tim3;
 
     tim3 = 0;
     TIM3_EGR_bit.UG = 1; // Reinitialize TIM3
 #endif
 
     if (!RTC_CR2_bit.WUTE) RTC_WakeupSet(ENABLE); // Enable wakeup timer
-    EXTI_SR1_bit.P2F = 1; // Clear EXTI2 IRQ flag
+    EXTI_SR1_bit.P1F = 1; // Clear EXTI1 IRQ flag
 }
 
 // TIM2 Update/Overflow/Trigger/Break interrupt IRQ handle
@@ -139,7 +149,7 @@ __interrupt void TIM2_UIF_IRQHandler(void) {
     tim2++;
     if (tim2 > TIM_TIMEOUT) {
         TIM2_CR1_bit.CEN = 0; // Disable TIM2 counter
-        cntr_EXTI1 = 0;
+        cntr_EXTI0 = 0;
         tim2_diff  = 0;
     }
     TIM2_SR1_bit.UIF = 0; // Clear TIM2 update interrupt flag
@@ -151,7 +161,7 @@ __interrupt void TIM3_UIF_IRQHandler(void) {
     tim3++;
     if (tim3 > TIM_TIMEOUT) {
         TIM3_CR1_bit.CEN = 0; // Disable TIM3 counter
-        cntr_EXTI2 = 0;
+        cntr_EXTI1 = 0;
         tim3_diff  = 0;
     }
     TIM3_SR1_bit.UIF = 0; // Clear TIM3 update interrupt flag
@@ -205,21 +215,21 @@ int main(void)
     CLK_PCKENR2_bit.PCKEN27 = 0; // Disable Boot ROM
 
     // Configure unused GPIO ports as input with pull-up for powersaving
-    // PB0
-    PB_ODR_bit.ODR0 = 0; // Latch "0" in input register
-    PB_DDR_bit.DDR0 = 0; // Set as input
-    PB_CR1_bit.C10  = 1; // Input with Pull-up
-    PB_CR2_bit.C20  = 0; // External interrupt disabled
+    // PB2
+    PB_ODR_bit.ODR2 = 0; // Latch "0" in input register
+    PB_DDR_bit.DDR2 = 0; // Set as input
+    PB_CR1_bit.C12  = 1; // Input with Pull-up
+    PB_CR2_bit.C22  = 0; // External interrupt disabled
     // PD0
     PD_ODR_bit.ODR0 = 0; // Latch "0" in input register
     PD_DDR_bit.DDR0 = 0; // Set as input
     PD_CR1_bit.C10  = 1; // Input with Pull-up
     PD_CR2_bit.C20  = 0; // External interrupt disabled
     // PC1
-    PD_ODR_bit.ODR1 = 0; // Latch "0" in input register
-    PD_DDR_bit.DDR1 = 0; // Set as input
-    PD_CR1_bit.C11  = 1; // Input with Pull-up
-    PD_CR2_bit.C21  = 0; // External interrupt disabled
+    PC_ODR_bit.ODR1 = 0; // Latch "0" in input register
+    PC_DDR_bit.DDR1 = 0; // Set as input
+    PC_CR1_bit.C11  = 1; // Input with Pull-up
+    PC_CR2_bit.C21  = 0; // External interrupt disabled
     // PC4
     PC_ODR_bit.ODR4 = 0; // Latch "0" in input register
     PC_DDR_bit.DDR4 = 0; // Set as output
@@ -227,16 +237,28 @@ int main(void)
     PC_CR2_bit.C24  = 0; // External interrupt disabled
 
     // Magnetic reed inputs
+    // PB0 = Reed#0
+    PB_ODR_bit.ODR0 = 1; // Latch "1" in input register
+    PB_DDR_bit.DDR0 = 0; // Set PB2 as input
+    PB_CR1_bit.C10  = 0; // Floating input (it requires an external pull-up resistor)
+    PB_CR2_bit.C20  = 1; // Enable external interrupt
     // PB1 = Reed#1
-    // PB2 = Reed#2
     PB_ODR_bit.ODR1 = 1; // Latch "1" in input register
     PB_DDR_bit.DDR1 = 0; // Set PB1 as input
     PB_CR1_bit.C11  = 0; // Floating input (it requires an external pull-up resistor)
     PB_CR2_bit.C21  = 1; // Enable external interrupt
-    PB_ODR_bit.ODR2 = 1; // Latch "1" in input register
-    PB_DDR_bit.DDR2 = 0; // Set PB2 as input
-    PB_CR1_bit.C12  = 0; // Floating input (it requires an external pull-up resistor)
-    PB_CR2_bit.C22  = 1; // Enable external interrupt
+
+    // LED pins
+    // PA3 = CDC_LED
+    PA_ODR_bit.ODR3 = 1; // Latch "1" in input register
+    PA_DDR_bit.DDR3 = 1; // Set PA3 as output
+    PA_CR1_bit.C13  = 1; // Slow output
+    PA_CR2_bit.C23  = 0; // Disable external interrupt
+    // PA2 = SPD_LED
+    PA_ODR_bit.ODR2 = 1; // Latch "1" in input register
+    PA_DDR_bit.DDR2 = 1; // Set PA2 as output
+    PA_CR1_bit.C12  = 1; // Slow output
+    PA_CR2_bit.C22  = 0; // Disable external interrupt
 
 #ifdef DEBUG
     // UART pinout
@@ -246,6 +268,31 @@ int main(void)
     UART_Init();
     UART_SendStr("Speed & Cadence RF sensor (C) Wolk 2014\n");
 #endif
+
+    // Configure RTC
+#ifdef DEBUG
+    UART_SendStr("RTC init ... ");
+    RTC_Init();
+    UART_SendStr("ok\n");
+#else
+    RTC_Init();
+#endif
+    RTC_WakeupConfig(RTC_WUC_RTCCLK_Div16); // RTC wakeup clock = LSE/RTCDIV/16
+
+/*
+    RTC_WakeupIT(ENABLE);
+    RTC_WakeupSet(ENABLE);
+    while(1) {
+        RTC_WakeupTimerSet(15);
+        LED_RED();
+        asm("halt");
+        LED_GREEN();
+        asm("halt");
+        RTC_WakeupTimerSet(WU_TIMER * 4);
+        LED_OFF();
+        asm("halt");
+    }
+*/
 
     // nRF24L01 pinout
     // PB3 - CE
@@ -266,8 +313,26 @@ int main(void)
     }
 #else
     if (nRF24_Check()) {
-        // No answer from nRF24L01 -> go deep sleep mode
-        while(1) asm("halt");
+        // No answer from nRF24L01 --> DISASTER!
+        // Disable all the peripherials to conserve some power
+        CLK_PCKENR1 = 0;
+        CLK_PCKENR2 = 0;
+        CLK_PCKENR3 = 0;
+        // Disable the magnetic reed pins external interrupts
+        PB_CR2_bit.C20 = 0;
+        PB_CR2_bit.C21 = 0;
+        // Blink red LED
+        CLK_PCKENR2_bit.PCKEN22 = 1; // Enable RTC peripherial (PCKEN22)
+        RTC_WakeupIT(ENABLE);
+        RTC_WakeupSet(ENABLE);
+        while(1) {
+            RTC_WakeupTimerSet(WU_TIMER / 4); // 1/4 second
+            LED_RED();
+            asm("halt");
+            RTC_WakeupTimerSet(WU_TIMER * 5); // 5 seconds
+            LED_OFF();
+            asm("halt");
+        }
     }
 #endif
     // Configure nRF24L01 for TX mode:
@@ -277,16 +342,6 @@ int main(void)
     // 1Mbps - gives 3dB better receiver sensitivity compared to 2Mbps
     nRF24_TXMode(RF_RETR,1,RF_CHANNEL,nRF24_DataRate_1Mbps,nRF24_TXPower_18dBm,nRF24_CRC_on,nRF24_CRC_2byte,nRF24_PWR_Down);
     for (i = 0; i < TX_PAYLOAD; i++) buf[i] = 0x00; // it's obvious :)
-
-    // Configure RTC
-#ifdef DEBUG
-    UART_SendStr("RTC init ... ");
-    RTC_Init();
-    UART_SendStr("ok\n");
-#else
-    RTC_Init();
-#endif
-    RTC_WakeupConfig(RTC_WUC_RTCCLK_Div16); // RTC wakeup clock = LSE/RTCDIV/16
 
     // If VREFINT is not set on factory, assign average standard value
     if (Factory_VREFINT != 0) {
@@ -346,10 +401,10 @@ int main(void)
 
     // Configure external interrupts
     CPU_CFG_GCR_bit.AL = 1; // Interrupt-only activation level (IRET causes the CPU to go back to Halt mode)
+    EXTI_CR1_bit.P0IS = 0x02; // EXTI0 on falling edge
     EXTI_CR1_bit.P1IS = 0x02; // EXTI1 on falling edge
-    EXTI_CR1_bit.P2IS = 0x02; // EXTI2 on falling edge
-    ITC_SPR3_bit.VECT9SPR  = 0x03; // IRQ level 3 (high priority)
-    ITC_SPR3_bit.VECT10SPR = 0x03; // IRQ level 3 (high priority)
+    ITC_SPR3_bit.VECT8SPR = 0x03; // EXTI0 IRQ level 3 (high priority)
+    ITC_SPR3_bit.VECT9SPR = 0x03; // EXTI1 IRQ level 3 (high priority)
     asm("rim"); // Enable global interrupts (enable priorities)
 
     // Configure wakeup timer
@@ -381,9 +436,9 @@ int main(void)
         UART_SendUInt(cntr_wake);
 
         UART_SendStr("   EXTI: ");
-        UART_SendUInt(cntr_EXTI1);
+        UART_SendUInt(cntr_EXTI0);
         UART_SendChar(':');
-        UART_SendUInt(cntr_EXTI2);
+        UART_SendUInt(cntr_EXTI1);
 
         UART_SendStr("   DIFF: ");
         UART_SendUInt(tim2_diff);
@@ -441,10 +496,10 @@ int main(void)
 #endif
 
         // Prepare data packet for nRF24L01
-        buf[0]  = cntr_EXTI1 >> 8;
-        buf[1]  = cntr_EXTI1 & 0xff;
-        buf[2]  = cntr_EXTI2 >> 8;
-        buf[3]  = cntr_EXTI2 & 0xff;
+        buf[0]  = cntr_EXTI0 >> 8;
+        buf[1]  = cntr_EXTI0 & 0xff;
+        buf[2]  = cntr_EXTI1 >> 8;
+        buf[3]  = cntr_EXTI1 & 0xff;
         buf[4]  = tim2_diff >> 8;
         buf[5]  = tim2_diff & 0xff;
         buf[6]  = tim3_diff >> 8;

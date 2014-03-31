@@ -91,7 +91,8 @@ void RTC_TuneClock(const uint32_t LSI_freq) {
     RTC_ISR1_bit.INIT = 1; // Enter initialization mode
     // Poll INITF flag until it is set in RTC_ISR1 (with timeout for any case).
     // It takes around 2 RTCCLK clock cycles according to datasheet
-    while ((RTC_ISR1_bit.INITF == 0) && (cntr != 0xFFFF)) cntr++;
+    //while ((RTC_ISR1_bit.INITF == 0) && (cntr != 0xFFFF)) cntr++;
+    while (!RTC_ISR1_bit.INITF);
     RTC_APRER  = 0x04;
     prediv_s   = (LSI_freq - 160) / 160;
     RTC_SPRERH = (uint8_t)(prediv_s >> 8);
@@ -114,7 +115,8 @@ void RTC_Init(void) {
     RTC_ISR1_bit.INIT = 1; // Enter initialization mode
     // Poll INITF flag until it is set in RTC_ISR1 (with timeout for any case).
     // It takes around 2 RTCCLK clock cycles according to datasheet
-    while ((RTC_ISR1_bit.INITF == 0) && (cntr != 0xFFFF)) cntr++;
+    //while ((RTC_ISR1_bit.INITF == 0) && (cntr != 0xFFFF)) cntr++;
+    while (!RTC_ISR1_bit.INITF);
     RTC_APRER  = 0x08;
     RTC_SPRERH = 0x00;
     RTC_SPRERL = 0x80;
@@ -134,7 +136,8 @@ void RTC_WakeupConfig(RTC_WakeupClock_TypeDef WakeupClock) {
     RTC_CR2_bit.WUTIE = 0; // Disable wakeup interrupt
     // Poll WUTWF flag until it is set in RTC_ISR1 (with timeout for any case).
     // It takes around 2 RTCCLK clock cycles according to datasheet
-    while ((RTC_ISR1_bit.WUTWF == 0) && (cntr != 0xFFFF)) cntr++;
+    //while ((RTC_ISR1_bit.WUTWF == 0) && (cntr != 0xFFFF)) cntr++;
+    while (!RTC_ISR1_bit.WUTWF);
     RTC_CR1 = WakeupClock; // Configure wakeup clock source
     RTC_Lock(); // Enable write protection of RTC registers
 }
@@ -166,7 +169,8 @@ void RTC_WakeupTimerSet(uint16_t timer_count) {
     RTC_CR2_bit.WUTE = 0; // WUTR* registers can be changed only when WUTE bit is reset
     // Poll WUTWF flag until it is set in RTC_ISR1 (with timeout for any case).
     // It takes around 2 RTCCLK clock cycles according to datasheet
-    while ((RTC_ISR1_bit.WUTWF == 0) && (cntr != 0xFFFF)) cntr++;
+    //while ((RTC_ISR1_bit.WUTWF == 0) && (cntr != 0xFFFF)) cntr++;
+    while (!RTC_ISR1_bit.WUTWF);
     RTC_WUTRH = (uint8_t)(timer_count >> 8);
     RTC_WUTRL = (uint8_t)timer_count;
     RTC_CR2 = old_CR2;
