@@ -5,10 +5,6 @@
 #include "nRF24.h"
 
 
-uint8_t nRF24_RX_addr[nRF24_RX_ADDR_WIDTH] = {'W','o','l','k','S'};
-uint8_t nRF24_TX_addr[nRF24_TX_ADDR_WIDTH] = {'W','o','l','k','S'};
-
-
 // Check the specified SPI flag
 FlagStatus SPI_GetFlagStatus(SPI_FLAG_TypeDef flag) {
     return ((SPI1_SR & (uint8_t)flag) != (uint8_t)RESET) ? SET : RESET;
@@ -37,7 +33,6 @@ void nRF24_init() {
     PB_DDR |= 0x78; // Set PB3..PB6 as output
     PB_CR1 |= 0x78; // Configure PB3..PB6 as output with push-pull
     PB_CR2 |= 0x78; // Set 10MHz output speed for PB3..PB6 pins
-    //PB_CR2 &= ~(0x78); // Set 2MHz output speed for PB3..PB6 pins
 
     // MISO pin set as input with pull-up
     PB_DDR_bit.DDR7 = 0; // Set PB7 as input
@@ -61,7 +56,6 @@ void nRF24_init() {
     SPI1_CR1_bit.SPE      = 0; // Peripherial enabled
     */
     SPI1_CR1 = 0x04; // SPI: MSB first, Baud=f/2, Master, CPOL=low, CPHA=1st edge
-    //SPI1_CR1 = 0x24; // SPI: MSB first, Baud=f/32, Master, CPOL=low, CPHA=1st edge
 
     /*
     SPI1_CR2_bit.BDM    = 0; // 2-line unidirectional data mode
@@ -156,18 +150,18 @@ uint8_t nRF24_WriteBuf(uint8_t reg, uint8_t *pBuf, uint8_t count) {
 
 // Check if nRF24L01 present (send byte sequence, read it back and compare)
 // return:
-//   0 - looks like an nRF24L01 is online
-//   1 - received sequence differs from original
+//   1 - looks like an nRF24L01 is online
+//   0 - received sequence differs from original
 uint8_t nRF24_Check(void) {
-    uint8_t txbuf[5] = { 'W','o','l','k','?' };
+    uint8_t txbuf[5] = { 'n','R','F','2','4' };
     uint8_t rxbuf[5];
     uint8_t i;
 
     nRF24_WriteBuf(nRF24_CMD_WREG | nRF24_REG_TX_ADDR,txbuf,5); // Write fake TX address
     nRF24_ReadBuf(nRF24_REG_TX_ADDR,rxbuf,5); // Try to read TX_ADDR register
-    for (i = 0; i < 5; i++) if (rxbuf[i] != txbuf[i]) return 1;
+    for (i = 0; i < 5; i++) if (rxbuf[i] != txbuf[i]) return 0;
 
-    return 0;
+    return 1;
 }
 
 // Set nRF24L01 frequency channel
@@ -176,20 +170,6 @@ uint8_t nRF24_Check(void) {
 // Note, what part of the OBSERVER_TX register called "PLOS_CNT" will be cleared!
 void nRF24_SetRFChannel(uint8_t RFChannel) {
     nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_RF_CH,RFChannel);
-}
-
-// Put nRF24L01 in RX mode
-void nRF24_RXMode(uint8_t RX_PAYLOAD) {
-    CE_L();
-    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_EN_AA,0x01); // Enable ShockBurst for data pipe 0
-    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_EN_RXADDR,0x01); // Enable data pipe 0
-    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_RF_CH,0x6E); // Set frequency channel 110 (2.510MHz)
-    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_RX_PW_P0,RX_PAYLOAD); // Set RX payload length
-    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_RF_SETUP,0x06); // Setup: 1Mbps, 0dBm, LNA off
-    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_CONFIG,0x0F); // Config: CRC on (2 bytes), Power UP, RX/TX ctl = PRX
-    nRF24_WriteBuf(nRF24_CMD_WREG | nRF24_REG_RX_ADDR_P0,nRF24_RX_addr,nRF24_RX_ADDR_WIDTH); // Set static RX address
-    CE_H();
-    // Delay_us(10); // Hold CE high at least 10us
 }
 
 // Put nRF24L01 in TX mode
@@ -203,9 +183,11 @@ void nRF24_RXMode(uint8_t RX_PAYLOAD) {
 //   CRC - CRC state (nRF24_CRC_on or nRF24_CRC_off)
 //   CRCO - CRC encoding scheme (nRF24_CRC_1byte or nRF24_CRC_2byte)
 //   PWR - power state (nRF24_PWR_Up or nRF24_PWR_Down)
+//   TX_Addr - array with TX address
+//   TX_Addr_Width - size of TX address (3..5 byte)
 void nRF24_TXMode(uint8_t RetrCnt, uint8_t RetrDelay, uint8_t RFChan, nRF24_DataRate_TypeDef DataRate,
                   nRF24_TXPower_TypeDef TXPower, nRF24_CRC_TypeDef CRC, nRF24_CRCO_TypeDef CRCO,
-                  nRF24_PWR_TypeDef PWR) {
+                  nRF24_PWR_TypeDef PWR, uint8_t *TX_Addr, uint8_t TX_Addr_Width) {
     CE_L();
     nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_EN_AA,0x01); // Enable ShockBurst for data pipe 0
     nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_SETUP_RETR,((RetrDelay << 4) & 0xf0) | RetrCnt & 0x0f); // Auto retransmit settings
@@ -213,8 +195,10 @@ void nRF24_TXMode(uint8_t RetrCnt, uint8_t RetrDelay, uint8_t RFChan, nRF24_Data
     nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_RF_SETUP,(uint8_t)DataRate | (uint8_t)TXPower); // Setup register
     nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_CONFIG,(uint8_t)CRC | (uint8_t)CRCO | (uint8_t)PWR | nRF24_PRIM_TX); // Config register
     nRF24_SetRFChannel(RFChan); // Set frequency channel (OBSERVER_TX part PLOS_CNT will be cleared)
-    nRF24_WriteBuf(nRF24_CMD_WREG | nRF24_REG_TX_ADDR,nRF24_TX_addr,nRF24_TX_ADDR_WIDTH); // Set static TX address
-    nRF24_WriteBuf(nRF24_CMD_WREG | nRF24_REG_RX_ADDR_P0,nRF24_RX_addr,nRF24_RX_ADDR_WIDTH); // Set static RX address for auto ack
+    //nRF24_WriteBuf(nRF24_CMD_WREG | nRF24_REG_TX_ADDR,nRF24_TX_addr,nRF24_TX_ADDR_WIDTH); // Set static TX address
+    //nRF24_WriteBuf(nRF24_CMD_WREG | nRF24_REG_RX_ADDR_P0,nRF24_RX_addr,nRF24_RX_ADDR_WIDTH); // Set static RX address for auto ack same as TX address
+    nRF24_WriteBuf(nRF24_CMD_WREG | nRF24_REG_TX_ADDR,TX_Addr,TX_Addr_Width); // Set static TX address
+    nRF24_WriteBuf(nRF24_CMD_WREG | nRF24_REG_RX_ADDR_P0,TX_Addr,TX_Addr_Width); // Set static RX address for auto ack same as TX address
 }
 
 // Send data packet
@@ -231,7 +215,7 @@ uint8_t nRF24_TXPacket(uint8_t * pBuf, uint8_t TX_PAYLOAD) {
     nRF24_WriteBuf(nRF24_CMD_W_TX_PAYLOAD,pBuf,TX_PAYLOAD); // Write specified buffer to FIFO
     CE_H(); // CE pin high => Start transmit
     // Delay_us(10); // Must hold CE at least 10us
-    while(PC_IDR_bit.IDR0 != 0); // Wait for IRQ from nRF24L01
+    while(PC_IDR_bit.IDR0); // Wait for IRQ from nRF24L01
     CE_L();
     status = nRF24_ReadReg(nRF24_REG_STATUS); // Read status register
     nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_STATUS,status); // Reset TX_DS and MAX_RT bits

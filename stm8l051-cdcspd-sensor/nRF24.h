@@ -109,18 +109,9 @@ typedef enum {
 #define nRF24_FIFO_RX_EMPTY        0x01  // RX FIFO empty flag
 #define nRF24_FIFO_RX_FULL         0x02  // RX FIFO full flag
 
-// Some constants
-#define nRF24_RX_ADDR_WIDTH        5    // nRF24 RX address width
-#define nRF24_TX_ADDR_WIDTH        5    // nRF24 TX address width
-
-
-// Variables
-extern uint8_t nRF24_RX_addr[nRF24_RX_ADDR_WIDTH];
-extern uint8_t nRF24_TX_addr[nRF24_TX_ADDR_WIDTH];
-
 
 // Function prototypes
-void nRF24_init();
+void nRF24_init(void);
 
 uint8_t nRF24_RWReg(uint8_t reg, uint8_t value);
 uint8_t nRF24_ReadReg(uint8_t reg);
@@ -130,10 +121,9 @@ uint8_t nRF24_WriteBuf(uint8_t reg, uint8_t *pBuf, uint8_t count);
 uint8_t nRF24_Check(void);
 
 void nRF24_SetRFChannel(uint8_t RFChannel);
-void nRF24_RXMode(uint8_t RX_PAYLOAD);
 void nRF24_TXMode(uint8_t RetrCnt, uint8_t RetrDelay, uint8_t RFChan, nRF24_DataRate_TypeDef DataRate,
                   nRF24_TXPower_TypeDef TXPower, nRF24_CRC_TypeDef CRC, nRF24_CRCO_TypeDef CRCO,
-                  nRF24_PWR_TypeDef PWR);
+                  nRF24_PWR_TypeDef PWR, uint8_t *TX_Addr, uint8_t TX_Addr_Width);
 uint8_t nRF24_TXPacket(uint8_t * pBuf, uint8_t TX_PAYLOAD);
 void nRF24_PowerDown(void);
 void nRF24_Wake(void);
