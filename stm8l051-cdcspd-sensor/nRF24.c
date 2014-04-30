@@ -45,7 +45,7 @@ void nRF24_init() {
     PC_CR2_bit.C20  = 0; // Disable external interrupt
 
     // Configure SPI
-    CLK_PCKENR1_bit.PCKEN14 = 1; // Enable SPI peripherial (PCKEN14)
+    CLK_PCKENR1_bit.PCKEN14 = 1; // Enable SPI peripheral (PCKEN14)
 
     /*
     SPI1_CR1_bit.BR       = 0; // Baud = f/2 (1MHz at 2MHz CPU)
@@ -53,7 +53,7 @@ void nRF24_init() {
     SPI1_CR1_bit.CPOL     = 0; // CPOL = low (SCK low when idle)
     SPI1_CR1_bit.LSBFIRST = 0; // first bit is MSB
     SPI1_CR1_bit.MSTR     = 1; // Master configuration
-    SPI1_CR1_bit.SPE      = 0; // Peripherial enabled
+    SPI1_CR1_bit.SPE      = 0; // Peripheral enabled
     */
     SPI1_CR1 = 0x04; // SPI: MSB first, Baud=f/2, Master, CPOL=low, CPHA=1st edge
 
@@ -66,7 +66,7 @@ void nRF24_init() {
     */
     SPI1_CR2 = 0x03; // SPI: 2-line mode, full duplex, SSM on (master mode)
 
-    SPI1_CR1_bit.SPE = 1; // SPI peripherial enabled
+    SPI1_CR1_bit.SPE = 1; // SPI peripheral enabled
 
     CSN_H();
     CE_L(); // CE pin low -> power down mode at startup
@@ -189,16 +189,13 @@ void nRF24_TXMode(uint8_t RetrCnt, uint8_t RetrDelay, uint8_t RFChan, nRF24_Data
                   nRF24_TXPower_TypeDef TXPower, nRF24_CRC_TypeDef CRC, nRF24_CRCO_TypeDef CRCO,
                   nRF24_PWR_TypeDef PWR, uint8_t *TX_Addr, uint8_t TX_Addr_Width) {
     CE_L();
-    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_EN_AA,0x01); // Enable ShockBurst for data pipe 0
-    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_SETUP_RETR,((RetrDelay << 4) & 0xf0) | RetrCnt & 0x0f); // Auto retransmit settings
-    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_RF_CH,RFChan); // Set frequency channel
+    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_SETUP_RETR,((RetrDelay << 4) & 0xf0) | (RetrCnt & 0x0f)); // Auto retransmit settings
     nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_RF_SETUP,(uint8_t)DataRate | (uint8_t)TXPower); // Setup register
     nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_CONFIG,(uint8_t)CRC | (uint8_t)CRCO | (uint8_t)PWR | nRF24_PRIM_TX); // Config register
     nRF24_SetRFChannel(RFChan); // Set frequency channel (OBSERVER_TX part PLOS_CNT will be cleared)
-    //nRF24_WriteBuf(nRF24_CMD_WREG | nRF24_REG_TX_ADDR,nRF24_TX_addr,nRF24_TX_ADDR_WIDTH); // Set static TX address
-    //nRF24_WriteBuf(nRF24_CMD_WREG | nRF24_REG_RX_ADDR_P0,nRF24_RX_addr,nRF24_RX_ADDR_WIDTH); // Set static RX address for auto ack same as TX address
     nRF24_WriteBuf(nRF24_CMD_WREG | nRF24_REG_TX_ADDR,TX_Addr,TX_Addr_Width); // Set static TX address
-    nRF24_WriteBuf(nRF24_CMD_WREG | nRF24_REG_RX_ADDR_P0,TX_Addr,TX_Addr_Width); // Set static RX address for auto ack same as TX address
+    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_EN_AA,0x01); // Enable ShockBurst for data pipe 0 to receive ACK packet
+    nRF24_WriteBuf(nRF24_CMD_WREG | nRF24_REG_RX_ADDR_P0,TX_Addr,TX_Addr_Width); // Static RX address on PIPE0 must same as TX address for auto ack
 }
 
 // Send data packet

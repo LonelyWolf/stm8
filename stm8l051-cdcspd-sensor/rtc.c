@@ -83,7 +83,6 @@ void RTC_Lock(void) {
 // Input: LSI_freq - LSI frequency in Hz
 void RTC_TuneClock(const uint32_t LSI_freq) {
     uint16_t prediv_s;
-    uint16_t cntr = 0;
 
     while (CLK_CRTCR_bit.RTCSWBSY); // Wait for RTCSWBSY flag to clear
     CLK_CRTCR = 0xA4; // RTC clock: source LSI, RTCDIV = 32
@@ -91,7 +90,6 @@ void RTC_TuneClock(const uint32_t LSI_freq) {
     RTC_ISR1_bit.INIT = 1; // Enter initialization mode
     // Poll INITF flag until it is set in RTC_ISR1 (with timeout for any case).
     // It takes around 2 RTCCLK clock cycles according to datasheet
-    //while ((RTC_ISR1_bit.INITF == 0) && (cntr != 0xFFFF)) cntr++;
     while (!RTC_ISR1_bit.INITF);
     RTC_APRER  = 0x04;
     prediv_s   = (LSI_freq - 160) / 160;
@@ -105,8 +103,6 @@ void RTC_TuneClock(const uint32_t LSI_freq) {
 
 // RTC initialization
 void RTC_Init(void) {
-    uint16_t cntr = 0;
-
     while (CLK_CRTCR_bit.RTCSWBSY); // Wait for RTCSWBSY flag to clear
     CLK_CRTCR = 0xB0; // RTC clock: source LSE, RTCDIV = 32
     while (!CLK_ECKCR_bit.LSERDY); // Wait for LSE stabilization
@@ -115,7 +111,6 @@ void RTC_Init(void) {
     RTC_ISR1_bit.INIT = 1; // Enter initialization mode
     // Poll INITF flag until it is set in RTC_ISR1 (with timeout for any case).
     // It takes around 2 RTCCLK clock cycles according to datasheet
-    //while ((RTC_ISR1_bit.INITF == 0) && (cntr != 0xFFFF)) cntr++;
     while (!RTC_ISR1_bit.INITF);
     RTC_APRER  = 0x08;
     RTC_SPRERH = 0x00;
@@ -129,8 +124,6 @@ void RTC_Init(void) {
 // Configure RTC Wakeup clock source
 // Input: WakeupClock - specifies wakeup clock source
 void RTC_WakeupConfig(RTC_WakeupClock_TypeDef WakeupClock) {
-    uint16_t cntr = 0;
-
     RTC_Unlock(); // Disable write protection of RTC registers
     RTC_CR2_bit.WUTE  = 0; // Disable wakeup timer
     RTC_CR2_bit.WUTIE = 0; // Disable wakeup interrupt
@@ -162,7 +155,6 @@ void RTC_WakeupIT(FunctionalState state) {
 // Input: cntr = wake up timer count
 void RTC_WakeupTimerSet(uint16_t timer_count) {
     uint8_t old_CR2;
-    uint16_t cntr = 0;
 
     RTC_Unlock(); // Disable write protection of RTC registers
     old_CR2 = RTC_CR2; // Preserve value of the CR2 register for WUTE bit state

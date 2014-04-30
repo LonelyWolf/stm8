@@ -30,22 +30,22 @@
 
 #define TX_PAYLOAD           16  // nRF24L01 Payload length
 #define RF_CHANNEL           90  // nRF24L01 channel (90ch = 2490MHz)
-#define RF_RETR              10  // nRF24L01 TX retransmit count (max 15)
+#define RF_RETR               5  // nRF24L01 TX retransmit count (max 15)
 
-#define TIM_DEBOUNCE         60  // Debounce delay, higher value means lowest high speed can be measured.
+#define TIM_DEBOUNCE         65  // Debounce delay, higher value means lowest high speed can be measured.
 #define TIM_TIMEOUT        6000  // Magnetic reed impulse timeout (roughly measured in milliseconds)
 
 #define WU_TIMER             63  // Wakeup timer Period = (WU_TIMER + 1) * 0,015625 seconds (63 = 1 second)
 
-#define VREF_OFF_DUTY       100  // Internal voltage measure off-duty ratio
+#define VREF_OFF_DUTY       600  // Internal voltage measure off-duty ratio
 
 #define START_BLINKS          3  // How many times the green LED will blink after reset
 #define REED_PASSES          60  // How many reed passes the LED will blink after reset
 #define LED_BLINK_ON_TIME   252  // How many TIM4 periods the LED will be lit
 
-//uint8_t nRF24_RX_addr[nRF24_RX_ADDR_WIDTH] = {'W','o','l','k','S'};
 #define nRF24_TX_Addr   "WolkS"  // TX address for nRF24L01
 #define nRF24_TX_Addr_Size    5  // TX address size
+
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -117,23 +117,19 @@ __interrupt void EXTI0_IRQHandler(void) {
 
 #ifdef SOFT_DEBOUNCE
     if (tim2 > TIM_DEBOUNCE) {
+#endif
         cntr_EXTI0++;
         if (cntr_EXTI0 > 1) tim2_diff = tim2;
         tim2 = 0;
         TIM2_EGR_bit.UG = 1; // Reinitialize TIM2
 
         if (cntr_rst_passes) {
-            LED_RED();
             TIM4_CR1_bit.CEN = 1; // Enable TIM4 counter
             TIM4_EGR_bit.UG = 1; // Reinitialize TIM4
+            LED_RED();
         }
+#ifdef SOFT_DEBOUNCE
     }
-#else
-    cntr_EXTI0++;
-    if (cntr_EXTI0 > 1) tim2_diff = tim2;
-
-    tim2 = 0;
-    TIM2_EGR_bit.UG = 1; // Reinitialize TIM2
 #endif
 
     if (!RTC_CR2_bit.WUTE) RTC_WakeupSet(ENABLE); // Enable wakeup timer
@@ -147,6 +143,7 @@ __interrupt void EXTI1_IRQHandler(void) {
 
 #ifdef SOFT_DEBOUNCE
     if (tim3 > TIM_DEBOUNCE) {
+#endif
         cntr_EXTI1++;
         if (cntr_EXTI1 > 1) tim3_diff = tim3;
 
@@ -154,17 +151,12 @@ __interrupt void EXTI1_IRQHandler(void) {
         TIM3_EGR_bit.UG = 1; // Reinitialize TIM3
 
         if (cntr_rst_passes) {
-            LED_GREEN();
             TIM4_CR1_bit.CEN = 1; // Enable TIM4 counter
             TIM4_EGR_bit.UG = 1; // Reinitialize TIM4
+            LED_GREEN();
         }
+#ifdef SOFT_DEBOUNCE
     }
-#else
-    cntr_EXTI1++;
-    if (cntr_EXTI1 > 1) tim3_diff = tim3;
-
-    tim3 = 0;
-    TIM3_EGR_bit.UG = 1; // Reinitialize TIM3
 #endif
 
     if (!RTC_CR2_bit.WUTE) RTC_WakeupSet(ENABLE); // Enable wakeup timer
@@ -212,10 +204,12 @@ __interrupt void TIM4_UIF_IRQHandler(void) {
     }
 }
 
+
 ///////////////////////////////////////////////////////////////////////////////
 
 
-// Init Vreint ADC channel
+// Enable ADC and configure Vrefint channel
+// Must be some delay after this to stabilize ADC (Twkup = 3us)
 void ADC_Vrefint_Init(void) {
     CLK_PCKENR2_bit.PCKEN20 = 1; // Enable ADC peripherial (PCKEN20)
     ADC1_CR1_bit.ADON = 1; // Enable ADC
@@ -232,7 +226,7 @@ uint16_t ADC_Vrefint_Measure(uint8_t count) {
     uint8_t cntr;
 
     // Measure voltage "count" times and calculate rough average value
-    for (cntr = 0; cntr < count - 1; cntr++) {
+    for (cntr = 1; cntr < count; cntr++) {
         ADC1_CR1_bit.START = 1; // Start ADC conversion, by software trigger
         while (!ADC1_SR_bit.EOC); // Wait for the conversion ends
         adc_res  = (ADC1_DRH << 8); // Get ADC converted data
@@ -261,12 +255,10 @@ int main(void)
     CLK_PCKENR2_bit.PCKEN27 = 0; // Disable Boot ROM
 
     // LED pins
-    // PA3 = CDC_LED
     PA_ODR_bit.ODR3 = 0; // Latch "1" in input register
     PA_DDR_bit.DDR3 = 1; // Set PA3 as output
     PA_CR1_bit.C13  = 1; // Slow output
     PA_CR2_bit.C23  = 0; // Disable external interrupt
-    // PA2 = SPD_LED
     PA_ODR_bit.ODR2 = 0; // Latch "1" in input register
     PA_DDR_bit.DDR2 = 1; // Set PA2 as output
     PA_CR1_bit.C12  = 1; // Slow output
@@ -329,6 +321,23 @@ int main(void)
     RTC_WakeupIT(ENABLE); // Enable wakeup interrupt
     RTC_WakeupSet(DISABLE); // Disable wakeup counter
 
+    // If VREFINT is not set on factory, assign average standard value
+    if (Factory_VREFINT) {
+        factory_vref = 0x0600 | (uint16_t)Factory_VREFINT;
+    } else {
+        factory_vref = 0x0687;
+    }
+    ADC_Vrefint_Init();
+    vrefint = ADC_Vrefint_Measure(10);
+    ADC_Vrefint_Disable();
+    vrefint = (((uint32_t)factory_vref * 300) / vrefint);
+#ifdef DEBUG
+    UART_SendStr("Vcc: ");
+    UART_SendInt(vrefint / 100); UART_SendChar('.');
+    UART_SendInt(vrefint % 100); UART_SendStr("V\n");
+    UART_SendChars('-',80); UART_SendChar('\n');
+#endif
+
     // nRF24L01 pinout
     // PB3 - CE
     // PB4 - NSS
@@ -372,7 +381,6 @@ int main(void)
 #ifdef DEBUG
         UART_SendStr("ok\n");
 #endif
-        // TODO: send test packet to bike computer?
     }
 
     // Configure nRF24L01 for TX mode:
@@ -384,23 +392,6 @@ int main(void)
                  nRF24_CRC_on,nRF24_CRC_2byte,nRF24_PWR_Down,
                  nRF24_TX_Addr,nRF24_TX_Addr_Size);
     for (i = 0; i < TX_PAYLOAD; i++) buf[i] = 0x00; // it's obvious :)
-
-    // If VREFINT is not set on factory, assign average standard value
-    if (Factory_VREFINT) {
-        factory_vref = 0x0600 | (uint16_t)Factory_VREFINT;
-    } else {
-        factory_vref = 0x0687;
-    }
-    ADC_Vrefint_Init();
-    vrefint = ADC_Vrefint_Measure(5);
-    ADC_Vrefint_Disable();
-    vrefint = (((uint32_t)factory_vref * 300) / vrefint);
-#ifdef DEBUG
-    UART_SendStr("Vcc: ");
-    UART_SendInt(vrefint / 100); UART_SendChar('.');
-    UART_SendInt(vrefint % 100); UART_SendStr("V\n");
-    UART_SendChars('-',80); UART_SendChar('\n');
-#endif
 
     // Timers initialization
     CLK_PCKENR1_bit.PCKEN10 = 1; // Enable TIM2 peripherial
@@ -479,7 +470,7 @@ int main(void)
     while(1) {
         // Wake nRF24L01 (Power Down -> Standby-I mode)
         // This will take about 1.5ms with internal nRF24L01 oscillator or 150us with external.
-        // So here delay is not necessary since nRF24L01 uses external oscillator.
+        // Delay here is unnecessary since nRF24L01 uses external oscillator.
         nRF24_Wake();
 
         cntr_wake++; // Count wakeups for debug purposes
@@ -535,7 +526,7 @@ int main(void)
         // Measure supply voltage
         if (!(cntr_wake % VREF_OFF_DUTY)) {
             ADC_Vrefint_Init();
-            vrefint = ADC_Vrefint_Measure(5);
+            vrefint = ADC_Vrefint_Measure(10);
             ADC_Vrefint_Disable();
             vrefint = (((uint32_t)factory_vref * 300) / vrefint);
         }
