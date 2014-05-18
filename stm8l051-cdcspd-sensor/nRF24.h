@@ -10,8 +10,9 @@ typedef enum {
 
 // nRF24L01 data rate
 typedef enum {
-    nRF24_DataRate_1Mbps = (uint8_t)0x00, // 1Mbps data rate
-    nRF24_DataRate_2Mbps = (uint8_t)0x08  // 2Mbps data rate
+    nRF24_DataRate_250kbps = (uint8_t)0x20, // 250kbps data rate
+    nRF24_DataRate_1Mbps   = (uint8_t)0x00, // 1Mbps data rate
+    nRF24_DataRate_2Mbps   = (uint8_t)0x08  // 2Mbps data rate
 } nRF24_DataRate_TypeDef;
 
 // nRF24L01 RF output power in TX mode
@@ -21,12 +22,6 @@ typedef enum {
     nRF24_TXPower_6dBm  = (uint8_t)0x04, //  -6dBm
     nRF24_TXPower_0dBm  = (uint8_t)0x06  //   0dBm
 } nRF24_TXPower_TypeDef;
-
-// nRF24L01 setup LNA gain
-typedef enum {
-    nRF24_NLA_on  = (uint8_t)0x01, // LNA gain enabled
-    nRF24_NLA_off = (uint8_t)0x00  // LNA gain disabled
-} nRF24_LNA_TypeDef;
 
 // nRF24L01 enable CRC
 typedef enum {

@@ -28,9 +28,9 @@
 #define TIM2LSE                  // If defined - TIM2 will be clocked from LSE
 #define TIM3LSE                  // If defined - TIM3 will be clocked from LSE
 
-#define TX_PAYLOAD           16  // nRF24L01 Payload length
+#define TX_PAYLOAD           17  // nRF24L01 Payload length
 #define RF_CHANNEL           90  // nRF24L01 channel (90ch = 2490MHz)
-#define RF_RETR               5  // nRF24L01 TX retransmit count (max 15)
+#define RF_RETR              10  // nRF24L01 TX retransmit count (max 15)
 
 #define TIM_DEBOUNCE         65  // Debounce delay, higher value means lowest high speed can be measured.
 #define TIM_TIMEOUT        6000  // Magnetic reed impulse timeout (roughly measured in milliseconds)
@@ -78,6 +78,9 @@ volatile uint16_t tim2 = 0;
 volatile uint16_t tim3 = 0;
 volatile uint16_t tim4 = 0;
 
+// TIM counter from last successfull packet sent
+volatile uint16_t ride_time = 0;
+
 // How many times after reset magnet passed the sensors
 uint8_t cntr_rst_passes = REED_PASSES;
 
@@ -87,7 +90,7 @@ const nRF24_TXPower_TypeDef tx_rf_powers[4] = { nRF24_TXPower_18dBm,
                                                 nRF24_TXPower_12dBm,
                                                 nRF24_TXPower_6dBm,
                                                 nRF24_TXPower_0dBm };
-uint8_t tx_power = 0; // RF output power
+uint8_t tx_power = 3; // RF output power
 
 #ifdef DEBUG
     float speed;
@@ -119,7 +122,7 @@ __interrupt void EXTI0_IRQHandler(void) {
     if (tim2 > TIM_DEBOUNCE) {
 #endif
         cntr_EXTI0++;
-        if (cntr_EXTI0 > 1) tim2_diff = tim2;
+        if (cntr_EXTI0 > 2) tim2_diff = tim2;
         tim2 = 0;
         TIM2_EGR_bit.UG = 1; // Reinitialize TIM2
 
@@ -139,13 +142,19 @@ __interrupt void EXTI0_IRQHandler(void) {
 // EXTI1 IRQ handle
 #pragma vector=EXTI1_vector
 __interrupt void EXTI1_IRQHandler(void) {
+    uint16_t tmp;
+
     TIM3_CR1_bit.CEN = 1; // Enable TIM3 counter
 
 #ifdef SOFT_DEBOUNCE
     if (tim3 > TIM_DEBOUNCE) {
 #endif
         cntr_EXTI1++;
-        if (cntr_EXTI1 > 1) tim3_diff = tim3;
+        if (cntr_EXTI1 > 2) {
+            tim3_diff = tim3;
+            tmp = tim3;
+            ride_time += tmp;
+        }
 
         tim3 = 0;
         TIM3_EGR_bit.UG = 1; // Reinitialize TIM3
@@ -331,6 +340,7 @@ int main(void)
     vrefint = ADC_Vrefint_Measure(10);
     ADC_Vrefint_Disable();
     vrefint = (((uint32_t)factory_vref * 300) / vrefint);
+    if (vrefint > 1023) vrefint = 1023;
 #ifdef DEBUG
     UART_SendStr("Vcc: ");
     UART_SendInt(vrefint / 100); UART_SendChar('.');
@@ -384,12 +394,13 @@ int main(void)
     }
 
     // Configure nRF24L01 for TX mode:
-    // RF_RETR retransmits with 500us delay
-    // RF channel 90 (2490MHz), -18dBm TX power, LNA gain enabled, 2-byte CRC
+    // Automatic retransmit RF_RETR times
+    // Automatic retransmit delay is 1250us (payload <= 24 bytes)
+    // RF channel 90 (2490MHz), 0dBm TX power, 1-byte CRC
     // Power down mode initially
-    // 1Mbps - gives 3dB better receiver sensitivity compared to 2Mbps
-    nRF24_TXMode(RF_RETR,1,RF_CHANNEL,nRF24_DataRate_1Mbps,nRF24_TXPower_18dBm,
-                 nRF24_CRC_on,nRF24_CRC_2byte,nRF24_PWR_Down,
+    // 250kbps data rate
+    nRF24_TXMode(RF_RETR,4,RF_CHANNEL,nRF24_DataRate_250kbps,nRF24_TXPower_0dBm,
+                 nRF24_CRC_on,nRF24_CRC_1byte,nRF24_PWR_Down,
                  nRF24_TX_Addr,nRF24_TX_Addr_Size);
     for (i = 0; i < TX_PAYLOAD; i++) buf[i] = 0x00; // it's obvious :)
 
@@ -529,6 +540,7 @@ int main(void)
             vrefint = ADC_Vrefint_Measure(10);
             ADC_Vrefint_Disable();
             vrefint = (((uint32_t)factory_vref * 300) / vrefint);
+            if (vrefint > 1023) vrefint = 1023;
         }
 #ifdef DEBUG
         UART_SendStr("   Vcc: ");
@@ -538,36 +550,40 @@ int main(void)
 #endif
 
         // Prepare data packet for nRF24L01
-        buf[0]  = cntr_EXTI0 >> 8;
-        buf[1]  = cntr_EXTI0 & 0xff;
-        buf[2]  = cntr_EXTI1 >> 8;
-        buf[3]  = cntr_EXTI1 & 0xff;
-        buf[4]  = tim2_diff >> 8;
-        buf[5]  = tim2_diff & 0xff;
-        buf[6]  = tim3_diff >> 8;
-        buf[7]  = tim3_diff & 0xff;
-        buf[8]  = vrefint >> 8;
-        buf[9]  = vrefint & 0xff;
-        buf[10] = prev_observe_TX;
-        buf[11] = cntr_wake >> 8;
-        buf[12] = cntr_wake & 0xff;
-        buf[13] = packets_lost >> 8;
-        buf[14] = packets_lost & 0xff;
-        buf[15] = tx_power;
+        buf[0]  = cntr_EXTI1 >> 8;
+        buf[1]  = cntr_EXTI1 & 0xff;
+        buf[2]  = tim2_diff >> 8;
+        buf[3]  = tim2_diff & 0xff;
+        buf[4]  = tim3_diff >> 8;
+        buf[5]  = tim3_diff & 0xff;
+        buf[6]  = tx_power << 2;
+        buf[6] |= (vrefint >> 8) & 0x03;
+        buf[7]  = vrefint & 0xff;
+        buf[8]  = prev_observe_TX;
+        buf[9]  = cntr_wake >> 8;
+        buf[10] = cntr_wake & 0xff;
+        buf[11] = packets_lost >> 8;
+        buf[12] = packets_lost & 0xff;
+        buf[13] = ride_time >> 8;
+        buf[14] = ride_time & 0xff;
 
         nRF24_SetRFChannel(RF_CHANNEL); // Set RF channel to clean "PLOS_CNT" part of the OBERVER_TX register
         i = nRF24_TXPacket(buf,TX_PAYLOAD);
         prev_observe_TX = nRF24_ReadReg(nRF24_REG_OBSERVE_TX);
         nRF24_PowerDown(); // Standby-I -> Power down
-
         packets_lost += prev_observe_TX >> 4;
 
+        // Packet sent success, clear ride timer
+        if (!(prev_observe_TX >> 4)) ride_time = 0;
+
+/*
         // Lame adaptive TX power: increase power if it was retransmissions and decrease otherwise
         if ((prev_observe_TX & 0x0f) > 0) {
             if (tx_power < 3) nRF24_SetTXPower(tx_rf_powers[tx_power++]);
         } else {
             if (tx_power > 0) nRF24_SetTXPower(tx_rf_powers[tx_power--]);
         }
+*/
 
 #ifdef DEBUG
         UART_SendStr("  nRF24: ");

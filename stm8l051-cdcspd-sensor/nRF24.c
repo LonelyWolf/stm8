@@ -178,7 +178,7 @@ void nRF24_SetRFChannel(uint8_t RFChannel) {
 //   RetrCnt - Auto retransmit count on fail of AA (1..15 or 0 for disable)
 //   RetrDelay - Auto retransmit delay 250us+(0..15)*250us (0 = 250us, 15 = 4000us)
 //   RFChan - Frequency channel (0..127) (frequency = 2400 + RFChan [MHz])
-//   DataRate - Set data rate: nRF24_DataRate_1Mbps or nRF24_DataRate_2Mbps
+//   DataRate - Set data rate (nRF24_DataRate_250kbps, nRF24_DataRate_1Mbps, nRF24_DataRate_2Mbps)
 //   TXPower - RF output power (-18dBm, -12dBm, -6dBm, 0dBm)
 //   CRC - CRC state (nRF24_CRC_on or nRF24_CRC_off)
 //   CRCO - CRC encoding scheme (nRF24_CRC_1byte or nRF24_CRC_2byte)
@@ -189,7 +189,10 @@ void nRF24_TXMode(uint8_t RetrCnt, uint8_t RetrDelay, uint8_t RFChan, nRF24_Data
                   nRF24_TXPower_TypeDef TXPower, nRF24_CRC_TypeDef CRC, nRF24_CRCO_TypeDef CRCO,
                   nRF24_PWR_TypeDef PWR, uint8_t *TX_Addr, uint8_t TX_Addr_Width) {
     CE_L();
-    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_SETUP_RETR,((RetrDelay << 4) & 0xf0) | (RetrCnt & 0x0f)); // Auto retransmit settings
+
+    nRF24_ReadReg(0x00); // Dummy read
+
+    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_SETUP_RETR,(RetrDelay << 4) | (RetrCnt & 0x0f)); // Auto retransmit settings
     nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_RF_SETUP,(uint8_t)DataRate | (uint8_t)TXPower); // Setup register
     nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_CONFIG,(uint8_t)CRC | (uint8_t)CRCO | (uint8_t)PWR | nRF24_PRIM_TX); // Config register
     nRF24_SetRFChannel(RFChan); // Set frequency channel (OBSERVER_TX part PLOS_CNT will be cleared)
