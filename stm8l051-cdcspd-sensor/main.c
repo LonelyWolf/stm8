@@ -571,10 +571,15 @@ int main(void)
         i = nRF24_TXPacket(buf,TX_PAYLOAD);
         prev_observe_TX = nRF24_ReadReg(nRF24_REG_OBSERVE_TX);
         nRF24_PowerDown(); // Standby-I -> Power down
-        packets_lost += prev_observe_TX >> 4;
 
-        // Packet sent success, clear ride timer
-        if (!(prev_observe_TX >> 4)) ride_time = 0;
+        if (i & nRF24_MASK_TX_DS) {
+            // Packet sent successfully
+            ride_time = 0;
+        }
+        if (i & nRF24_MASK_MAX_RT) {
+            // Max retransmit count reached -> packet was not delivered
+            packets_lost += prev_observe_TX >> 4;
+        }
 
 /*
         // Lame adaptive TX power: increase power if it was retransmissions and decrease otherwise

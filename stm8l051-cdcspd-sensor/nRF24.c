@@ -5,6 +5,9 @@
 #include "nRF24.h"
 
 
+uint8_t buf1[5];
+uint8_t buf2[5];
+
 // Check the specified SPI flag
 FlagStatus SPI_GetFlagStatus(SPI_FLAG_TypeDef flag) {
     return ((SPI1_SR & (uint8_t)flag) != (uint8_t)RESET) ? SET : RESET;
@@ -126,7 +129,7 @@ uint8_t nRF24_ReadBuf(uint8_t reg, uint8_t *pBuf, uint8_t count) {
     CSN_L();
     status = nRF24_ReadWrite(reg);
     for (i = 0; i < count; i++) pBuf[i] = nRF24_ReadWrite(0);
-    CSN_L();
+    CSN_H();
 
     return status;
 }
@@ -189,13 +192,12 @@ void nRF24_TXMode(uint8_t RetrCnt, uint8_t RetrDelay, uint8_t RFChan, nRF24_Data
                   nRF24_TXPower_TypeDef TXPower, nRF24_CRC_TypeDef CRC, nRF24_CRCO_TypeDef CRCO,
                   nRF24_PWR_TypeDef PWR, uint8_t *TX_Addr, uint8_t TX_Addr_Width) {
     CE_L();
-
     nRF24_ReadReg(0x00); // Dummy read
-
     nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_SETUP_RETR,(RetrDelay << 4) | (RetrCnt & 0x0f)); // Auto retransmit settings
     nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_RF_SETUP,(uint8_t)DataRate | (uint8_t)TXPower); // Setup register
     nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_CONFIG,(uint8_t)CRC | (uint8_t)CRCO | (uint8_t)PWR | nRF24_PRIM_TX); // Config register
     nRF24_SetRFChannel(RFChan); // Set frequency channel (OBSERVER_TX part PLOS_CNT will be cleared)
+    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_SETUP_AW,TX_Addr_Width - 2); // Set address width
     nRF24_WriteBuf(nRF24_CMD_WREG | nRF24_REG_TX_ADDR,TX_Addr,TX_Addr_Width); // Set static TX address
     nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_EN_AA,0x01); // Enable ShockBurst for data pipe 0 to receive ACK packet
     nRF24_WriteBuf(nRF24_CMD_WREG | nRF24_REG_RX_ADDR_P0,TX_Addr,TX_Addr_Width); // Static RX address on PIPE0 must same as TX address for auto ack
@@ -219,18 +221,8 @@ uint8_t nRF24_TXPacket(uint8_t * pBuf, uint8_t TX_PAYLOAD) {
     CE_L();
     status = nRF24_ReadReg(nRF24_REG_STATUS); // Read status register
     nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_STATUS,status); // Reset TX_DS and MAX_RT bits
-    if (status & nRF24_MASK_MAX_RT) {
-        // Auto retransmit counter exceeds the programmed maximum limit. FIFO is not removed.
-        nRF24_RWReg(nRF24_CMD_FLUSH_TX,0xFF); // Flush TX FIFO buffer
-        return nRF24_MASK_MAX_RT;
-    };
-    if (status & nRF24_MASK_TX_DS) {
-        // Transmit ok
-        nRF24_RWReg(nRF24_CMD_FLUSH_TX,0xFF); // Flush TX FIFO buffer
-        return nRF24_MASK_TX_DS;
-    }
+    nRF24_RWReg(nRF24_CMD_FLUSH_TX,0xFF); // Flush TX FIFO buffer
 
-    // Some banana happens
     return status;
 }
 
