@@ -109,7 +109,7 @@ void RTC_Init(void) {
     CLK_PCKENR2_bit.PCKEN22 = 1; // Enable RTC peripherial (PCKEN22)
     RTC_Unlock(); // Disable write protection of RTC registers
     RTC_ISR1_bit.INIT = 1; // Enter initialization mode
-    // Poll INITF flag until it is set in RTC_ISR1 (with timeout for any case).
+    // Poll INITF flag until it is set in RTC_ISR1.
     // It takes around 2 RTCCLK clock cycles according to datasheet
     while (!RTC_ISR1_bit.INITF);
     RTC_APRER  = 0x08;
@@ -127,9 +127,8 @@ void RTC_WakeupConfig(RTC_WakeupClock_TypeDef WakeupClock) {
     RTC_Unlock(); // Disable write protection of RTC registers
     RTC_CR2_bit.WUTE  = 0; // Disable wakeup timer
     RTC_CR2_bit.WUTIE = 0; // Disable wakeup interrupt
-    // Poll WUTWF flag until it is set in RTC_ISR1 (with timeout for any case).
+    // Poll WUTWF flag until it is set in RTC_ISR1
     // It takes around 2 RTCCLK clock cycles according to datasheet
-    //while ((RTC_ISR1_bit.WUTWF == 0) && (cntr != 0xFFFF)) cntr++;
     while (!RTC_ISR1_bit.WUTWF);
     RTC_CR1 = WakeupClock; // Configure wakeup clock source
     RTC_Lock(); // Enable write protection of RTC registers
@@ -159,9 +158,8 @@ void RTC_WakeupTimerSet(uint16_t timer_count) {
     RTC_Unlock(); // Disable write protection of RTC registers
     old_CR2 = RTC_CR2; // Preserve value of the CR2 register for WUTE bit state
     RTC_CR2_bit.WUTE = 0; // WUTR* registers can be changed only when WUTE bit is reset
-    // Poll WUTWF flag until it is set in RTC_ISR1 (with timeout for any case).
+    // Poll WUTWF flag until it is set in RTC_ISR1
     // It takes around 2 RTCCLK clock cycles according to datasheet
-    //while ((RTC_ISR1_bit.WUTWF == 0) && (cntr != 0xFFFF)) cntr++;
     while (!RTC_ISR1_bit.WUTWF);
     RTC_WUTRH = (uint8_t)(timer_count >> 8);
     RTC_WUTRL = (uint8_t)timer_count;

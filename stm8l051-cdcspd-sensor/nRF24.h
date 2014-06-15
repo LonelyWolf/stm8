@@ -1,13 +1,3 @@
-// SPI flags (from stdperiph)
-typedef enum {
-    SPI_FLAG_BSY    = (uint8_t)0x80, // Busy flag
-    SPI_FLAG_OVR    = (uint8_t)0x40, // Overrun flag
-    SPI_FLAG_MODF   = (uint8_t)0x20, // Mode fault
-    SPI_FLAG_WKUP   = (uint8_t)0x08, // Wake-up flag
-    SPI_FLAG_TXE    = (uint8_t)0x02, // Transmit buffer empty
-    SPI_FLAG_RXNE   = (uint8_t)0x01  // Receive buffer empty
-} SPI_FLAG_TypeDef;
-
 // nRF24L01 data rate
 typedef enum {
     nRF24_DataRate_250kbps = (uint8_t)0x20, // 250kbps data rate
@@ -55,7 +45,7 @@ typedef enum {
 #define CE_L() PB_ODR_bit.ODR3 = 0;
 #define CE_H() PB_ODR_bit.ODR3 = 1;
 
-// SPI Chip Select
+// Chip Select
 #define CSN_L() PB_ODR_bit.ODR4 = 0;
 #define CSN_H() PB_ODR_bit.ODR4 = 1;
 

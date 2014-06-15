@@ -5,47 +5,29 @@
 #include "nRF24.h"
 
 
-uint8_t buf1[5];
-uint8_t buf2[5];
-
-// Check the specified SPI flag
-FlagStatus SPI_GetFlagStatus(SPI_FLAG_TypeDef flag) {
-    return ((SPI1_SR & (uint8_t)flag) != (uint8_t)RESET) ? SET : RESET;
-}
-
-// Transmit data byte through the SPI
-void SPI_SendData(uint8_t data) {
-    SPI1_DR = data;
-}
-
-// Return most recent received data by the SPI
-uint8_t SPI_ReceiveData(void) {
-    return (uint8_t)SPI1_DR;
-}
-
 // GPIO and SPI initialization
 void nRF24_init() {
-    // IRQ  --> PB2
+    // IRQ  --> PC0
     // CE   <-- PB3
     // CSN  <-- PB4
     // SCK  <-- PB5
     // MOSI <-- PB6
     // MISO --> PB7
 
-    // SCK,MOSI,CSN,CE pins set as output fiwth push-pull at 10MHz
-    PB_DDR |= 0x78; // Set PB3..PB6 as output
-    PB_CR1 |= 0x78; // Configure PB3..PB6 as output with push-pull
-    PB_CR2 |= 0x78; // Set 10MHz output speed for PB3..PB6 pins
+    // SCK,MOSI,CSN,CE pins (PB3..PB6) set as output fiwth push-pull at 10MHz
+    PB_DDR |= 0x78; // Output
+    PB_CR1 |= 0x78; // Push-pull
+    PB_CR2 |= 0x78; // 10MHz output speed
 
-    // MISO pin set as input with pull-up
-    PB_DDR_bit.DDR7 = 0; // Set PB7 as input
-    PB_CR1_bit.C17  = 1; // Configure PB7 as input with pull-up
-    PB_CR2_bit.C27  = 0; // Disable external interrupt for PB7
+    // MISO pin (PB7) set as input with pull-up
+    PB_DDR_bit.DDR7 = 0; // Input
+    PB_CR1_bit.C17  = 1; // Pull-up
+    PB_CR2_bit.C27  = 0; // Disable external interrupt
 
-    // IRQ pin set as input with pull-up
+    // IRQ pin (PC0) set as input with pull-up
     PC_DDR_bit.DDR0 = 0; // Input
     PC_CR1_bit.C10  = 1; // Pull-up
-    PC_CR2_bit.C20  = 0; // Disable external interrupt
+    PC_CR2_bit.C20  = 0; // Enable external interrupt
 
     // Configure SPI
     CLK_PCKENR1_bit.PCKEN14 = 1; // Enable SPI peripheral (PCKEN14)
@@ -66,8 +48,9 @@ void nRF24_init() {
     SPI1_CR2_bit.RXOnly = 0; // Full duplex
     SPI1_CR2_bit.SSI    = 1; // Master mode
     SPI1_CR2_bit.SSM    = 1; // Software slave management enabled
+    SPI1_CR2_bit.CRCEN  = 0; // CRC disabled
     */
-    SPI1_CR2 = 0x03; // SPI: 2-line mode, full duplex, SSM on (master mode)
+    SPI1_CR2 = 0x03; // SPI: 2-line mode, full duplex, SSM on (master mode), no CRC
 
     SPI1_CR1_bit.SPE = 1; // SPI peripheral enabled
 
@@ -80,10 +63,10 @@ void nRF24_init() {
 //   data - byte to send
 // output: received byte from nRF24L01
 uint8_t nRF24_ReadWrite(uint8_t data) {
-    while (SPI_GetFlagStatus(SPI_FLAG_TXE) == RESET); // Wait while DR register is not empty
-    SPI_SendData(data); // Send byte to SPI
-    while (SPI_GetFlagStatus(SPI_FLAG_RXNE) == RESET); // Wait to receive byte
-    return SPI_ReceiveData(); // Read byte from SPI bus
+    while (!(SPI1_SR & 0x02)); // Wait for TXE flag --> DR register is empty
+    SPI1_DR = data; // Send byte to SPI
+    while (!(SPI1_SR & 0x01)); // Wait for RXNE flag --> DR register is not empty
+    return (uint8_t)SPI1_DR; // Retrurn received byte from SPI peripheral
 }
 
 // Write new value to register
@@ -177,7 +160,6 @@ void nRF24_SetRFChannel(uint8_t RFChannel) {
 
 // Put nRF24L01 in TX mode
 // input:
-//
 //   RetrCnt - Auto retransmit count on fail of AA (1..15 or 0 for disable)
 //   RetrDelay - Auto retransmit delay 250us+(0..15)*250us (0 = 250us, 15 = 4000us)
 //   RFChan - Frequency channel (0..127) (frequency = 2400 + RFChan [MHz])
@@ -213,12 +195,11 @@ void nRF24_TXMode(uint8_t RetrCnt, uint8_t RetrDelay, uint8_t RFChan, nRF24_Data
 uint8_t nRF24_TXPacket(uint8_t * pBuf, uint8_t TX_PAYLOAD) {
     uint8_t status;
 
-    CE_L();
     nRF24_WriteBuf(nRF24_CMD_W_TX_PAYLOAD,pBuf,TX_PAYLOAD); // Write specified buffer to FIFO
-    CE_H(); // CE pin high => Start transmit
+    CE_H(); // Start transmit
     // Delay_us(10); // Must hold CE at least 10us
     while(PC_IDR_bit.IDR0); // Wait for IRQ from nRF24L01
-    CE_L();
+
     status = nRF24_ReadReg(nRF24_REG_STATUS); // Read status register
     nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_STATUS,status); // Reset TX_DS and MAX_RT bits
     nRF24_RWReg(nRF24_CMD_FLUSH_TX,0xFF); // Flush TX FIFO buffer
@@ -242,7 +223,6 @@ void nRF24_Wake(void) {
 
     conf = nRF24_ReadReg(nRF24_REG_CONFIG) | (1<<1); // Set PWR_UP bit
     nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_CONFIG,conf); // Wakeup
-    // Delay_ms(2); // Wakeup from Power Down to Standby-I mode takes 1.5ms
 }
 
 // Configure RF output power in TX mode
