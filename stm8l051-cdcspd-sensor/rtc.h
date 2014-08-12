@@ -1,3 +1,15 @@
+#ifndef _RTC_H
+#define _RTC_H
+
+
+#define RTC_LSE_INIT_TIMEOUT     0xFFFFFF     // LSE init timeout
+
+
+typedef enum {
+    RTC_OK          = 0x00, // Operation was successful
+    RTC_LSE_TIMEOUT = 0x01  // timeout occurred while initializing LSE
+} RTC_Result;
+
 // External clock control register (not defined in standard IAR library)
 #ifdef __IAR_SYSTEMS_ICC__
 typedef struct
@@ -61,7 +73,7 @@ uint32_t CLK_GetClockFreq(void);
 uint32_t CLK_GetLSIFreq(uint32_t master_freq);
 
 void RTC_TuneClock(const uint32_t LSI_freq);
-void RTC_Init(void);
+RTC_Result RTC_Init(void);
 void RTC_WakeupConfig(RTC_WakeupClock_TypeDef WakeupClock);
 void RTC_WakeupSet(FunctionalState state);
 void RTC_WakeupIT(FunctionalState state);
@@ -71,3 +83,5 @@ RTC_TimeTypeDef RTC_GetTime(void);
 RTC_DateTypeDef RTC_GetDate(void);
 RTC_TimeBCDTypeDef RTC_GetTimeBCD(void);
 RTC_DateBCDTypeDef RTC_GetDateBCD(void);
+
+#endif // _RTC_H

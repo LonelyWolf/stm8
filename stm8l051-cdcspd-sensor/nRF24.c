@@ -5,16 +5,23 @@
 #include "nRF24.h"
 
 
+// EXTI1 IRQ handle
+#pragma vector=EXTI1_vector
+__interrupt void EXTI1_IRQHandler(void) {
+    nRF24_ClearIRQFlags(); // Clear nRF24L01 IRQ flags to prevent new IRQ rising
+    EXTI_SR1_bit.P1F = 1; // Clear EXTI1 IRQ flag
+}
+
 // GPIO and SPI initialization
 void nRF24_init() {
-    // IRQ  --> PC0
+    // IRQ  --> PC1
     // CE   <-- PB3
     // CSN  <-- PB4
     // SCK  <-- PB5
     // MOSI <-- PB6
     // MISO --> PB7
 
-    // SCK,MOSI,CSN,CE pins (PB3..PB6) set as output fiwth push-pull at 10MHz
+    // SCK,MOSI,CSN,CE pins (PB3..PB6) set as output with push-pull at 10MHz
     PB_DDR |= 0x78; // Output
     PB_CR1 |= 0x78; // Push-pull
     PB_CR2 |= 0x78; // 10MHz output speed
@@ -24,10 +31,10 @@ void nRF24_init() {
     PB_CR1_bit.C17  = 1; // Pull-up
     PB_CR2_bit.C27  = 0; // Disable external interrupt
 
-    // IRQ pin (PC0) set as input with pull-up
-    PC_DDR_bit.DDR0 = 0; // Input
-    PC_CR1_bit.C10  = 1; // Pull-up
-    PC_CR2_bit.C20  = 0; // Enable external interrupt
+    // IRQ pin (PC1) set as input with pull-up
+    PC_DDR_bit.DDR1 = 0; // Input
+    PC_CR1_bit.C11  = 1; // Pull-up
+    PC_CR2_bit.C21  = 0; // Disable external interrupt
 
     // Configure SPI
     CLK_PCKENR1_bit.PCKEN14 = 1; // Enable SPI peripheral (PCKEN14)
@@ -56,6 +63,8 @@ void nRF24_init() {
 
     CSN_H();
     CE_L(); // CE pin low -> power down mode at startup
+
+    nRF24_ClearIRQFlags();
 }
 
 // Send/Receive data to nRF24L01 via SPI
@@ -158,10 +167,11 @@ void nRF24_SetRFChannel(uint8_t RFChannel) {
     nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_RF_CH,RFChannel);
 }
 
-// Put nRF24L01 in TX mode
+// Put nRF24L01 in TX mode (hardcoded to PIPE0)
 // input:
 //   RetrCnt - Auto retransmit count on fail of AA (1..15 or 0 for disable)
 //   RetrDelay - Auto retransmit delay 250us+(0..15)*250us (0 = 250us, 15 = 4000us)
+//   ENAA - enable auto acknowledgement for specified data pipe
 //   RFChan - Frequency channel (0..127) (frequency = 2400 + RFChan [MHz])
 //   DataRate - Set data rate (nRF24_DataRate_250kbps, nRF24_DataRate_1Mbps, nRF24_DataRate_2Mbps)
 //   TXPower - RF output power (-18dBm, -12dBm, -6dBm, 0dBm)
@@ -170,9 +180,10 @@ void nRF24_SetRFChannel(uint8_t RFChannel) {
 //   PWR - power state (nRF24_PWR_Up or nRF24_PWR_Down)
 //   TX_Addr - array with TX address
 //   TX_Addr_Width - size of TX address (3..5 byte)
-void nRF24_TXMode(uint8_t RetrCnt, uint8_t RetrDelay, uint8_t RFChan, nRF24_DataRate_TypeDef DataRate,
-                  nRF24_TXPower_TypeDef TXPower, nRF24_CRC_TypeDef CRC, nRF24_CRCO_TypeDef CRCO,
-                  nRF24_PWR_TypeDef PWR, uint8_t *TX_Addr, uint8_t TX_Addr_Width) {
+void nRF24_TXMode(uint8_t RetrCnt, uint8_t RetrDelay, nRF24_ENAA_TypeDef ENAA, uint8_t RFChan,
+                  nRF24_DataRate_TypeDef DataRate, nRF24_TXPower_TypeDef TXPower, nRF24_CRC_TypeDef CRC,
+                  nRF24_CRCO_TypeDef CRCO, nRF24_PWR_TypeDef PWR, uint8_t *TX_Addr,
+                  uint8_t TX_Addr_Width) {
     CE_L();
     nRF24_ReadReg(0x00); // Dummy read
     nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_SETUP_RETR,(RetrDelay << 4) | (RetrCnt & 0x0f)); // Auto retransmit settings
@@ -181,30 +192,27 @@ void nRF24_TXMode(uint8_t RetrCnt, uint8_t RetrDelay, uint8_t RFChan, nRF24_Data
     nRF24_SetRFChannel(RFChan); // Set frequency channel (OBSERVER_TX part PLOS_CNT will be cleared)
     nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_SETUP_AW,TX_Addr_Width - 2); // Set address width
     nRF24_WriteBuf(nRF24_CMD_WREG | nRF24_REG_TX_ADDR,TX_Addr,TX_Addr_Width); // Set static TX address
-    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_EN_AA,0x01); // Enable ShockBurst for data pipe 0 to receive ACK packet
-    nRF24_WriteBuf(nRF24_CMD_WREG | nRF24_REG_RX_ADDR_P0,TX_Addr,TX_Addr_Width); // Static RX address on PIPE0 must same as TX address for auto ack
+    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_EN_AA,ENAA); // Enable ShockBurst for data pipe 0 to receive ACK packet
+    if (ENAA != nRF24_ENAA_OFF) {
+        nRF24_WriteBuf(nRF24_CMD_WREG | nRF24_REG_RX_ADDR_P0,TX_Addr,TX_Addr_Width); // Static RX address on PIPE0 must same as TX address for auto ack
+    }
 }
 
 // Send data packet
 // input:
 //   pBuf - buffer with data to send
-// return:
-//   nRF24_MASK_MAX_RT - if transmit failed with maximum auto retransmit count
-//   nRF24_MAX_TX_DS - if transmit succeed
-//   contents of STATUS register otherwise
-uint8_t nRF24_TXPacket(uint8_t * pBuf, uint8_t TX_PAYLOAD) {
-    uint8_t status;
-
+//   TX_PAYLOAD - buffer size
+void nRF24_TXPacket(uint8_t * pBuf, uint8_t TX_PAYLOAD) {
+   nRF24_ClearIRQFlags(); // Clear nRF24L01 flags, just for any case
+    PC_CR2_bit.C21 = 1; // Enable external interrupt
     nRF24_WriteBuf(nRF24_CMD_W_TX_PAYLOAD,pBuf,TX_PAYLOAD); // Write specified buffer to FIFO
-    CE_H(); // Start transmit
-    // Delay_us(10); // Must hold CE at least 10us
-    while(PC_IDR_bit.IDR0); // Wait for IRQ from nRF24L01
-
-    status = nRF24_ReadReg(nRF24_REG_STATUS); // Read status register
-    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_STATUS,status); // Reset TX_DS and MAX_RT bits
+    CE_H(); // Start transmit (must hold CE at least 10us)
+    // In theory there should be a WFE instruction instead of WFI, but according to the ST errata sheet
+    // my be "incorrect code execution when WFE instruction is interrupted by ISR or event"
+    // So WFI executed here and EXTI1 IRQ bit cleared in EXTI1_IRQHandler() procedure
+    asm("WFI"); // Wait for the transmission ends (IRQ from nRF24L01)
+    PC_CR2_bit.C21 = 0; // Disable external interrupt
     nRF24_RWReg(nRF24_CMD_FLUSH_TX,0xFF); // Flush TX FIFO buffer
-
-    return status;
 }
 
 // Put nRF24 in Power Down mode
@@ -234,4 +242,12 @@ void nRF24_SetTXPower(nRF24_TXPower_TypeDef TXPower) {
     rf_setup  = nRF24_ReadReg(nRF24_REG_RF_SETUP);
     rf_setup &= 0xf9; // Clear RF_PWR bits
     nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_RF_SETUP,rf_setup | (uint8_t)TXPower);
+}
+
+// Clear all IRQ flags
+void nRF24_ClearIRQFlags(void) {
+    uint8_t status;
+
+    status = nRF24_ReadReg(nRF24_REG_STATUS);
+    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_STATUS,status | 0x70); // Clear RX_DR, TX_DS, MAX_RT flags
 }

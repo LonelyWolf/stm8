@@ -102,16 +102,22 @@ void RTC_TuneClock(const uint32_t LSI_freq) {
 }
 
 // RTC initialization
-void RTC_Init(void) {
+RTC_Result RTC_Init(void) {
+    uint32_t wait = RTC_LSE_INIT_TIMEOUT;
+
     while (CLK_CRTCR_bit.RTCSWBSY); // Wait for RTCSWBSY flag to clear
     CLK_CRTCR = 0xB0; // RTC clock: source LSE, RTCDIV = 32
-    while (!CLK_ECKCR_bit.LSERDY); // Wait for LSE stabilization
+
+    while (!CLK_ECKCR_bit.LSERDY && --wait); // Wait for LSE stabilization
+    if (!wait) return RTC_LSE_TIMEOUT;
+
     CLK_PCKENR2_bit.PCKEN22 = 1; // Enable RTC peripherial (PCKEN22)
     RTC_Unlock(); // Disable write protection of RTC registers
     RTC_ISR1_bit.INIT = 1; // Enter initialization mode
     // Poll INITF flag until it is set in RTC_ISR1.
     // It takes around 2 RTCCLK clock cycles according to datasheet
     while (!RTC_ISR1_bit.INITF);
+
     RTC_APRER  = 0x08;
     RTC_SPRERH = 0x00;
     RTC_SPRERL = 0x80;
@@ -119,6 +125,8 @@ void RTC_Init(void) {
     RTC_WUTRL  = 0xFF;
     RTC_ISR1_bit.INIT = 0; // Exit initialization mode
     RTC_Lock(); // Enable write protection of RTC registers
+
+    return RTC_OK;
 }
 
 // Configure RTC Wakeup clock source
