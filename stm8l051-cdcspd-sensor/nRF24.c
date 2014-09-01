@@ -175,24 +175,22 @@ void nRF24_SetRFChannel(uint8_t RFChannel) {
 //   RFChan - Frequency channel (0..127) (frequency = 2400 + RFChan [MHz])
 //   DataRate - Set data rate (nRF24_DataRate_250kbps, nRF24_DataRate_1Mbps, nRF24_DataRate_2Mbps)
 //   TXPower - RF output power (-18dBm, -12dBm, -6dBm, 0dBm)
-//   CRC - CRC state (nRF24_CRC_on or nRF24_CRC_off)
-//   CRCO - CRC encoding scheme (nRF24_CRC_1byte or nRF24_CRC_2byte)
+//   CRCS - CRC state (nRF24_CRC_[off | 1byte | 2byte])
 //   PWR - power state (nRF24_PWR_Up or nRF24_PWR_Down)
 //   TX_Addr - array with TX address
 //   TX_Addr_Width - size of TX address (3..5 byte)
 void nRF24_TXMode(uint8_t RetrCnt, uint8_t RetrDelay, nRF24_ENAA_TypeDef ENAA, uint8_t RFChan,
-                  nRF24_DataRate_TypeDef DataRate, nRF24_TXPower_TypeDef TXPower, nRF24_CRC_TypeDef CRC,
-                  nRF24_CRCO_TypeDef CRCO, nRF24_PWR_TypeDef PWR, uint8_t *TX_Addr,
-                  uint8_t TX_Addr_Width) {
+                  nRF24_DataRate_TypeDef DataRate, nRF24_TXPower_TypeDef TXPower, nRF24_CRC_TypeDef CRCS,
+                  nRF24_PWR_TypeDef PWR, uint8_t *TX_Addr, uint8_t TX_Addr_Width) {
     CE_L();
     nRF24_ReadReg(0x00); // Dummy read
     nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_SETUP_RETR,(RetrDelay << 4) | (RetrCnt & 0x0f)); // Auto retransmit settings
     nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_RF_SETUP,(uint8_t)DataRate | (uint8_t)TXPower); // Setup register
-    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_CONFIG,(uint8_t)CRC | (uint8_t)CRCO | (uint8_t)PWR | nRF24_PRIM_TX); // Config register
+    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_CONFIG,(uint8_t)CRCS | (uint8_t)PWR | nRF24_PRIM_TX); // Config register
     nRF24_SetRFChannel(RFChan); // Set frequency channel (OBSERVER_TX part PLOS_CNT will be cleared)
     nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_SETUP_AW,TX_Addr_Width - 2); // Set address width
     nRF24_WriteBuf(nRF24_CMD_WREG | nRF24_REG_TX_ADDR,TX_Addr,TX_Addr_Width); // Set static TX address
-    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_EN_AA,ENAA); // Enable ShockBurst for data pipe 0 to receive ACK packet
+    nRF24_RWReg(nRF24_CMD_WREG | nRF24_REG_EN_AA,ENAA); // ShockBurst
     if (ENAA != nRF24_ENAA_OFF) {
         nRF24_WriteBuf(nRF24_CMD_WREG | nRF24_REG_RX_ADDR_P0,TX_Addr,TX_Addr_Width); // Static RX address on PIPE0 must same as TX address for auto ack
     }
@@ -211,6 +209,7 @@ void nRF24_TXPacket(uint8_t * pBuf, uint8_t TX_PAYLOAD) {
     // my be "incorrect code execution when WFE instruction is interrupted by ISR or event"
     // So WFI executed here and EXTI1 IRQ bit cleared in EXTI1_IRQHandler() procedure
     asm("WFI"); // Wait for the transmission ends (IRQ from nRF24L01)
+    CE_L(); // Release CE pin (Standby-II -> Standby-I)
     PC_CR2_bit.C21 = 0; // Disable external interrupt
     nRF24_RWReg(nRF24_CMD_FLUSH_TX,0xFF); // Flush TX FIFO buffer
 }

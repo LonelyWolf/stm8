@@ -22,7 +22,7 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 
-#define TX_PAYLOAD           10  // nRF24L01 Payload length
+#define TX_PAYLOAD           11  // nRF24L01 Payload length
 #define RF_CHANNEL           90  // nRF24L01 channel (90ch = 2490MHz)
 
 #define TIM_DEBOUNCE         65  // Debounce delay, higher value means lowest high speed can be measured.
@@ -245,6 +245,26 @@ void ADC_Vrefint_Disable() {
     CLK_PCKENR2_bit.PCKEN20 = 0; // Disable ADC peripherial
 }
 
+// CRC8-CCITT calculation for buffer (polynomial: x^8 + x^2 + x + 1 (0xE0))
+// input:
+//   buf - pointer to the buffer to calc CRC
+//   len - length of the buffer (bytes)
+// return: CRC8 of the buffer
+uint8_t CRC8_CCITT(uint8_t *buf, uint8_t len) {
+    uint8_t i;
+    uint8_t data = 0;
+
+    while (len--) {
+        data ^= *buf++;
+        for (i = 0; i < 8; i++ ) {
+            if (data & 0x80) data ^= 0x07;
+            data <<= 1;
+        }
+    }
+
+    return data;
+}
+
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -374,8 +394,7 @@ int main(void) {
                  RF_CHANNEL,             // RF channel 90 (2490MHz)
                  nRF24_DataRate_250kbps, // 250kbps data rate
                  nRF24_TXPower_6dBm,     // TX power
-                 nRF24_CRC_on,           // CRC
-                 nRF24_CRC_1byte,        // CRC scheme
+                 nRF24_CRC_2byte,        // CRC scheme
                  nRF24_PWR_Down,         // Initial power state
                  nRF24_TX_Addr,          // TX address
                  nRF24_TX_Addr_Size      // TX address size
@@ -496,6 +515,7 @@ int main(void) {
         buf[7]  = vrefint & 0xff;
         buf[8]  = cntr_wake >> 8;
         buf[9]  = cntr_wake & 0xff;
+        buf[10] = CRC8_CCITT(buf,TX_PAYLOAD - 1);
 
         nRF24_TXPacket(buf,TX_PAYLOAD);
         nRF24_PowerDown(); // Standby-I -> Power down
