@@ -1,3 +1,7 @@
+// Define to prevent recursive inclusion -------------------------------------
+#ifndef __NRF24_H
+#define __NRF24_H
+
 // nRF24L01 data rate
 typedef enum {
     nRF24_DataRate_250kbps = (uint8_t)0x20, // 250kbps data rate
@@ -32,16 +36,47 @@ typedef enum {
     nRF24_PRIM_TX = (uint8_t)0x00  // PTX
 } nRF24_PRIM_TypeDef;
 
-// nRF24L01 auto acknowledgement settings
+// RX data pipe
 typedef enum {
-    nRF24_ENAA_OFF  = 0x00, // auto acknowledgement disabled
-    nRF24_ENAA_P0   = 0x01, // enable auto acknowledgement data pipe 0
-    nRF24_ENAA_P1   = 0x02, // enable auto acknowledgement data pipe 1
-    nRF24_ENAA_P2   = 0x04, // enable auto acknowledgement data pipe 2
-    nRF24_ENAA_P3   = 0x08, // enable auto acknowledgement data pipe 3
-    nRF24_ENAA_P4   = 0x10, // enable auto acknowledgement data pipe 4
-    nRF24_ENAA_P5   = 0x20, // enable auto acknowledgement data pipe 5
+    nRF24_RX_PIPE0 = (uint8_t)0x00,
+    nRF24_RX_PIPE1 = (uint8_t)0x01,
+    nRF24_RX_PIPE2 = (uint8_t)0x02,
+    nRF24_RX_PIPE3 = (uint8_t)0x03,
+    nRF24_RX_PIPE4 = (uint8_t)0x04,
+    nRF24_RX_PIPE5 = (uint8_t)0x05
+} nRF24_RX_PIPE_TypeDef;
+
+// nRF24L01 enable auto acknowledgment
+typedef enum {
+    nRF24_ENAA_OFF = (uint8_t)0x00, // Disable auto acknowledgment
+    nRF24_ENAA_P0  = (uint8_t)0x01, // Enable auto acknowledgment for PIPE#0
+    nRF24_ENAA_P1  = (uint8_t)0x02, // Enable auto acknowledgment for PIPE#1
+    nRF24_ENAA_P2  = (uint8_t)0x04, // Enable auto acknowledgment for PIPE#2
+    nRF24_ENAA_P3  = (uint8_t)0x08, // Enable auto acknowledgment for PIPE#3
+    nRF24_ENAA_P4  = (uint8_t)0x10, // Enable auto acknowledgment for PIPE#4
+    nRF24_ENAA_P5  = (uint8_t)0x20, // Enable auto acknowledgment for PIPE#5
 } nRF24_ENAA_TypeDef;
+
+// RX packet pipe
+typedef enum {
+    nRF24_RX_PCKT_PIPE0 = (uint8_t)0x00,
+    nRF24_RX_PCKT_PIPE1 = (uint8_t)0x01,
+    nRF24_RX_PCKT_PIPE2 = (uint8_t)0x02,
+    nRF24_RX_PCKT_PIPE3 = (uint8_t)0x03,
+    nRF24_RX_PCKT_PIPE4 = (uint8_t)0x04,
+    nRF24_RX_PCKT_PIPE5 = (uint8_t)0x05,
+    nRF24_RX_PCKT_EMPTY = (uint8_t)0xfe,
+    nRF24_RX_PCKT_ERROR = (uint8_t)0xff
+} nRF24_RX_PCKT_TypeDef;
+
+// TX packet result
+typedef enum {
+    nRF24_TX_SUCCESS,   // Packet transmitted successfully
+    nRF24_TX_TIMEOUT,   // It was timeout during packet transmit
+    nRF24_TX_MAXRT,     // Transmit failed with maximum auto retransmit count
+    nRF24_TX_ERROR      // Some error happens
+} nRF24_TX_PCKT_TypeDef;
+
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -99,23 +134,33 @@ typedef enum {
 #define nRF24_FIFO_RX_EMPTY        0x01  // RX FIFO empty flag
 #define nRF24_FIFO_RX_FULL         0x02  // RX FIFO full flag
 
+#define nRF24_TEST_ADDR         "nRF24"  // Fake address to test nRF24 presence
+
+#define nRF24_WAIT_TIMEOUT   0x000FFFFF  // Timeout counter
+
 
 // Function prototypes
 void nRF24_init(void);
-
-uint8_t nRF24_RWReg(uint8_t reg, uint8_t value);
+void nRF24_WriteReg(uint8_t reg, uint8_t value);
 uint8_t nRF24_ReadReg(uint8_t reg);
-uint8_t nRF24_ReadBuf(uint8_t reg, uint8_t *pBuf, uint8_t count);
-uint8_t nRF24_WriteBuf(uint8_t reg, uint8_t *pBuf, uint8_t count);
-
 uint8_t nRF24_Check(void);
-
 void nRF24_SetRFChannel(uint8_t RFChannel);
-void nRF24_TXMode(uint8_t RetrCnt, uint8_t RetrDelay, nRF24_ENAA_TypeDef ENAA, uint8_t RFChan,
-                  nRF24_DataRate_TypeDef DataRate, nRF24_TXPower_TypeDef TXPower, nRF24_CRC_TypeDef CRCS,
-                  nRF24_PWR_TypeDef PWR, uint8_t *TX_Addr, uint8_t TX_Addr_Width);
-void nRF24_TXPacket(uint8_t * pBuf, uint8_t TX_PAYLOAD);
+void nRF24_FlushTX(void);
+void nRF24_FlushRX(void);
+void nRF24_TXMode(uint8_t RetrCnt, uint8_t RetrDelay, uint8_t RFChan, nRF24_DataRate_TypeDef DataRate,
+                  nRF24_TXPower_TypeDef TXPower, nRF24_CRC_TypeDef CRCS, nRF24_PWR_TypeDef Power, uint8_t *TX_Addr,
+                  uint8_t TX_Addr_Width);
+void nRF24_RXMode(nRF24_RX_PIPE_TypeDef PIPE, nRF24_ENAA_TypeDef PIPE_AA, uint8_t RFChan,
+                  nRF24_DataRate_TypeDef DataRate, nRF24_CRC_TypeDef CRCS, uint8_t *RX_Addr, uint8_t RX_Addr_Width,
+                  uint8_t RX_PAYLOAD, nRF24_TXPower_TypeDef TXPower);
+
+nRF24_TX_PCKT_TypeDef nRF24_TXPacket(uint8_t * pBuf, uint8_t TX_PAYLOAD);
+nRF24_RX_PCKT_TypeDef nRF24_RXPacket(uint8_t * pBuf, uint8_t RX_PAYLOAD);
+
+void nRF24_ClearIRQFlags(void);
 void nRF24_PowerDown(void);
 void nRF24_Wake(void);
 void nRF24_SetTXPower(nRF24_TXPower_TypeDef TXPower);
 void nRF24_ClearIRQFlags(void);
+
+#endif // __NRF24_H

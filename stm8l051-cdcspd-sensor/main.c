@@ -388,11 +388,10 @@ int main(void) {
     }
 
     // Configure the nRF24L01+ in TX mode
-    nRF24_TXMode(0,                      // auto retransmit disabled
-                 0,                      // retransmit delay 1250us (payload <= 24 bytes)
-                 nRF24_ENAA_OFF,         // auto acknowledgement disabled
-                 RF_CHANNEL,             // RF channel 90 (2490MHz)
-                 nRF24_DataRate_250kbps, // 250kbps data rate
+    nRF24_TXMode(0,                      // no auto retransmit
+                 0,                      // retransmit delay 250us
+                 RF_CHANNEL,             // RF channel
+                 nRF24_DataRate_250kbps, // data rate
                  nRF24_TXPower_6dBm,     // TX power
                  nRF24_CRC_2byte,        // CRC scheme
                  nRF24_PWR_Down,         // Initial power state
