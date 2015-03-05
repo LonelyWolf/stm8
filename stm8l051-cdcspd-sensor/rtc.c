@@ -1,6 +1,7 @@
-#include "stdint.h"
-#include "iostm8l051f3.h"
-#include "stm8l051.h"
+#include <stdint.h>
+#include <iostm8l051f3.h>
+
+#include "main.h"
 #include "rtc.h"
 
 

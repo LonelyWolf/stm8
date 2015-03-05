@@ -1,5 +1,5 @@
-#ifndef _RTC_H
-#define _RTC_H
+#ifndef __RTC_H
+#define __RTC_H
 
 
 #define RTC_LSE_INIT_TIMEOUT     0xFFFFFF     // LSE init timeout
@@ -12,17 +12,16 @@ typedef enum {
 
 // External clock control register (not defined in standard IAR library)
 #ifdef __IAR_SYSTEMS_ICC__
-typedef struct
-{
-  unsigned char HSEON       : 1;
-  unsigned char HSERDY      : 1;
-  unsigned char LSEON       : 1;
-  unsigned char LSERDY      : 1;
-  unsigned char HSEBYP      : 1;
-  unsigned char LSEBYP      : 1;
+typedef struct {
+    unsigned char HSEON       : 1;
+    unsigned char HSERDY      : 1;
+    unsigned char LSEON       : 1;
+    unsigned char LSERDY      : 1;
+    unsigned char HSEBYP      : 1;
+    unsigned char LSEBYP      : 1;
 } __BITS_CLK_ECKCR;
 #endif
-__IO_REG8_BIT(CLK_ECKCR,   0x50C6, __READ_WRITE, __BITS_CLK_ECKCR);
+__IO_REG8_BIT(CLK_ECKCR, 0x50C6, __READ_WRITE, __BITS_CLK_ECKCR);
 
 typedef enum {
     CLK_LSE_OFF    = 0x00, // LSE Diasble
@@ -84,4 +83,4 @@ RTC_DateTypeDef RTC_GetDate(void);
 RTC_TimeBCDTypeDef RTC_GetTimeBCD(void);
 RTC_DateBCDTypeDef RTC_GetDateBCD(void);
 
-#endif // _RTC_H
+#endif // __RTC_H

@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="iso-8859-1"?>
+
+<project>
+  <fileVersion>2</fileVersion>
+  <configuration>
+    <name>Debug</name>
+    <toolchain>
+      <name>STM8</name>
+    </toolchain>
+    <debug>1</debug>
+  </configuration>
+  <configuration>
+    <name>release</name>
+    <toolchain>
+      <name>STM8</name>
+    </toolchain>
+    <debug>0</debug>
+  </configuration>
+  <file>
+    <name>$PROJ_DIR$\main.c</name>
+  </file>
+  <file>
+    <name>$PROJ_DIR$\main.h</name>
+  </file>
+  <file>
+    <name>$PROJ_DIR$\nRF24.c</name>
+    <configuration>
+      <name>Debug</name>
+    </configuration>
+  </file>
+  <file>
+    <name>$PROJ_DIR$\nRF24.h</name>
+  </file>
+  <file>
+    <name>$PROJ_DIR$\rtc.c</name>
+  </file>
+  <file>
+    <name>$PROJ_DIR$\rtc.h</name>
+  </file>
+</project>
+
+

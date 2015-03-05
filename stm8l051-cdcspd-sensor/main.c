@@ -11,10 +11,10 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 
-#include "stdint.h"
-#include "iostm8l051f3.h"
+#include <stdint.h>
+#include <iostm8l051f3.h>
 
-#include "stm8l051.h"
+#include "main.h"
 #include "nRF24.h"
 #include "rtc.h"
 
@@ -22,7 +22,6 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 
-#define TX_PAYLOAD           11  // nRF24L01 Payload length
 #define RF_CHANNEL           90  // nRF24L01 channel (90ch = 2490MHz)
 
 #define TIM_DEBOUNCE         65  // Debounce delay, higher value means lowest high speed can be measured.
@@ -62,8 +61,10 @@
 
 uint8_t i; // Really need to comment this?
 
-uint16_t vrefint; // Last measured internal voltage
-uint16_t factory_vref; // Factory measured internal voltage with 3V external
+// Last measured internal voltage
+uint16_t vrefint;
+// Factory measured internal voltage with 3V external
+uint16_t factory_vref;
 
 // EXTI# impulse counters
 volatile uint16_t cntr_EXTI0 = 0;
@@ -81,8 +82,18 @@ volatile uint16_t tim4 = 0;
 // How many times after reset magnet passed the sensors
 uint8_t cntr_rst_passes = REED_PASSES;
 
-uint8_t buf[TX_PAYLOAD]; // nRF24L01 payload buffer
-uint16_t cntr_wake = 0; // Wakeup counter
+// nRF24L01 payload buffer
+struct __packed {
+    uint16_t cntr_SPD;  // SPD impulses counter
+    uint16_t tim_SPD;   // SPD interval
+    uint16_t tim_CDC;   // CDC interval
+    uint16_t vrefint;   // Measured voltage
+    uint16_t cntr_wake; // Wake counter
+    uint8_t  CRC8;      // CRC8 of this packet
+} payload;
+
+// Wakeup counter
+uint16_t cntr_wake = 0;
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -399,7 +410,6 @@ int main(void) {
                  nRF24_TX_Addr_Size      // TX address size
     );
     nRF24_ClearIRQFlags();
-    for (i = 0; i < TX_PAYLOAD; i++) buf[i] = 0x00; // it's obvious :)
 
     // Timers initialization
     CLK_PCKENR1_bit.PCKEN10 = 1; // Enable TIM2 peripherial
@@ -504,20 +514,18 @@ int main(void) {
         }
 
         // Prepare data packet for nRF24L01
-        buf[0]  = cntr_EXTI4 >> 8;
-        buf[1]  = cntr_EXTI4 & 0xff;
-        buf[2]  = tim3_diff >> 8;
-        buf[3]  = tim3_diff & 0xff;
-        buf[4]  = tim2_diff >> 8;
-        buf[5]  = tim2_diff & 0xff;
-        buf[6] |= (vrefint >> 8) & 0x03;
-        buf[7]  = vrefint & 0xff;
-        buf[8]  = cntr_wake >> 8;
-        buf[9]  = cntr_wake & 0xff;
-        buf[10] = CRC8_CCITT(buf,TX_PAYLOAD - 1);
+        payload.cntr_SPD  = cntr_EXTI4;
+        payload.tim_SPD   = tim3_diff;
+        payload.tim_CDC   = tim2_diff;
+        payload.vrefint   = vrefint & 0x0300; // Save bits [7..2] for future use
+        payload.cntr_wake = cntr_wake;
+        payload.CRC8      = CRC8_CCITT((uint8_t *)&payload,sizeof(payload) - 1);
 
-        nRF24_TXPacket(buf,TX_PAYLOAD);
-        nRF24_PowerDown(); // Standby-I -> Power down
+        // Send data packet
+        nRF24_TXPacket((uint8_t *)&payload,sizeof(payload));
+
+        // Standby-I -> Power down
+        nRF24_PowerDown();
 
         if (TIM2_CR1_bit.CEN || TIM3_CR1_bit.CEN) {
             CPU_CFG_GCR_bit.AL = 1; // Set interrupt-only activation level
