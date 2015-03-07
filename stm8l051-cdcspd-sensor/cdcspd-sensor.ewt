@@ -10,7 +10,7 @@
     <debug>1</debug>
   </configuration>
   <configuration>
-    <name>release</name>
+    <name>Release</name>
     <toolchain>
       <name>STM8</name>
     </toolchain>
@@ -20,13 +20,7 @@
     <name>$PROJ_DIR$\main.c</name>
   </file>
   <file>
-    <name>$PROJ_DIR$\main.h</name>
-  </file>
-  <file>
     <name>$PROJ_DIR$\nRF24.c</name>
-    <configuration>
-      <name>Debug</name>
-    </configuration>
   </file>
   <file>
     <name>$PROJ_DIR$\nRF24.h</name>

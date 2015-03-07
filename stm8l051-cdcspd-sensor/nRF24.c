@@ -5,10 +5,6 @@
 #include "nRF24.h"
 
 
-// If defined wait for IRQ in polling mode, WFI otherwise
-//#define IRQ_POLL
-
-
 const uint8_t RX_PW_PIPES[6] = {
     nRF24_REG_RX_PW_P0,
     nRF24_REG_RX_PW_P1,
@@ -27,8 +23,65 @@ const uint8_t RX_ADDR_PIPES[6] = {
 };
 
 
+#ifndef IRQ_POLL
+// EXTI1 IRQ handle
+#pragma vector=EXTI1_vector
+__interrupt void EXTI1_IRQHandler(void) {
+    EXTI_SR1_bit.P1F = 1; // Clear the EXTI1 IRQ flag
+}
+#endif
+
+#ifdef SPI_USE_DMATX
+// DMA1 channel 2 transfer complete IRQ handle
+#pragma vector=DMA1_CH2_TC_vector
+__interrupt void DMA1_CHANNEL2_3_IRQHandler(void) {
+    if (DMA1_GIR1_bit.IFC2) {
+        // Channel 2 interrupt
+        DMA1_C2SPR_bit.TCIF = 0; // Clear the TC interrupt flag
+    }
+}
+
+// Initialize the DMA peripheral
+void SPI1_InitDMA(void) {
+    // Enable the DMA1 peripheral clock (PCKEN24)
+    CLK_PCKENR2_bit.PCKEN24 = 1;
+
+    // No DMA timeout
+    //DMA1_GCSR_bit.TO = 0;
+
+    // Configure the DMA channel 2 (SPI1_TX)
+    /*
+    DMA1_C2CR_bit.MINCDEC = 1; // Memory increment
+    DMA1_C2CR_bit.CIRC    = 0; // Circular mode disabled
+    DMA1_C2CR_bit.DIR     = 1; // Memory to peripheral transfers
+    DMA1_C2CR_bit.HTIE    = 0; // Half-transaction interrupt disabled
+    DMA1_C2CR_bit.TCIE    = 1; // Transaction complete interrupt enabled
+    DMA1_C2CR_bit.EN      = 0; // Channel disabled
+
+    DMA1_C2SPR_bit.PL1    = 0; // Channel priority: medium
+    DMA1_C2SPR_bit.PL0    = 1;
+    DMA1_C2SPR_bit.TSIZE  = 0; // 8-bit transactions
+    DMA1_C2SPR_bit.HTIF   = 0; // Clear the HT flag
+    DMA1_C2SPR_bit.TCIF   = 0; // Clear the TC flag
+    */
+    DMA1_C2CR   = 0x2A; // Memory -> peripheral, memory increment, TC IRQ, channel disabled
+    DMA1_C2SPR  = 0x10; // Medium channel priority, 8-bit transactions, TC and HT flags cleared
+    DMA1_C2NDTR = 0x00; // 0 bytes to transfer (set it later)
+    DMA1_C2PARH = (uint8_t)((uint16_t)(&SPI1_DR) >> 8); // SPI_DR register address
+    DMA1_C2PARL = (uint8_t)((uint16_t)(&SPI1_DR) & 0xFF);
+    DMA1_C2M0ARH = 0x00; // Memory address (set it later)
+    DMA1_C2M0ARL = 0x00;
+
+    DMA1_GCSR_bit.GEN = 1; // Global enable of the DMA channels
+
+    // Disable the DMA1 peripheral clock (to save power)
+    // The peripheral remain configured when it will be clocked next time
+    CLK_PCKENR2_bit.PCKEN24 = 0;
+}
+#endif
+
 // GPIO and SPI initialization
-void nRF24_init() {
+void nRF24_Init() {
     // IRQ  --> PC1
     // CE   <-- PB3
     // CSN  <-- PB4
@@ -80,6 +133,11 @@ void nRF24_init() {
     CE_L(); // CE pin low -> power down mode at startup
 
     nRF24_ClearIRQFlags();
+
+#ifdef SPI_USE_DMATX
+    // Initialize the DMA peripheral
+    SPI1_InitDMA();
+#endif
 }
 
 // Transmit byte via SPI
@@ -151,7 +209,7 @@ void nRF24_ReadBuf(uint8_t reg, uint8_t *pBuf, uint8_t count) {
 // input:
 //   reg - register number
 //   pBuf - pointer to the data buffer
-//   count - number of bytes to write
+//   count - number of bytes to send
 void nRF24_WriteBuf(uint8_t reg, uint8_t *pBuf, uint8_t count) {
     CSN_L();
     SPI1_SendRecv(nRF24_CMD_WREG | reg); // Send buffer address
@@ -169,6 +227,35 @@ void nRF24_WriteBuf(uint8_t reg, uint8_t *pBuf, uint8_t count) {
     CSN_H();
 }
 
+#ifdef SPI_USE_DMATX
+// Send data buffer to the nRF24L01 (using DMA)
+// input:
+//   reg - register number
+//   pBuf - pointer to the data buffer
+//   count - number of byte to send
+// note: the DMA peripheral must initialized before calling this procedure
+void nRF24_WriteBuf_DMA(uint8_t reg, uint8_t *pBuf, uint8_t count) {
+    CSN_L();
+    SPI1_SendRecv(nRF24_CMD_WREG | reg); // Send buffer address
+    SPI1_ICR_bit.TXDMAEN = 1; // SPI TX buffer DMA enable
+    CLK_PCKENR2_bit.PCKEN24 = 1; // Enable the DMA1 peripheral clock (PCKEN24)
+    DMA1_C2M0ARH = (uint8_t)((uint16_t)pBuf >> 8); // DMA1 channel 2 memory address
+    DMA1_C2M0ARL = (uint8_t)((uint16_t)pBuf & 0xFF);
+    DMA1_C2NDTR = count; // DMA transactions count
+    DMA1_C2CR_bit.EN = 1; // Enable the DMA1 channel 2
+    // In theory there should be a WFE instruction instead of WFI, but according to the ST errata sheet
+    // my be "incorrect code execution when WFE instruction is interrupted by ISR or event"
+    // So WFI executed here and DMA1 channel 2 TC IRQ bit cleared in DMA1_CHANNEL2_3_IRQHandler() procedure
+    asm("WFI"); // Wait for the DMA transactions complete
+    while (!(SPI1_SR_bit.TXE)); // Wait until TX buffer is empty
+    while (SPI1_SR_bit.BSY); // Wait until the transmission is complete
+    DMA1_C2CR_bit.EN = 0; // Disable the DMA channel 2
+    CLK_PCKENR2_bit.PCKEN24 = 0; // Disable the DMA1 peripheral clock (to save power)
+    SPI1_ICR_bit.TXDMAEN = 0; // SPI TX buffer DMA disable
+    CSN_H();
+}
+#endif
+
 // Check if nRF24L01 present (send byte sequence, read it back and compare)
 // return:
 //   1 - looks like an nRF24L01 is online
@@ -176,7 +263,7 @@ void nRF24_WriteBuf(uint8_t reg, uint8_t *pBuf, uint8_t count) {
 uint8_t nRF24_Check(void) {
     uint8_t rxbuf[5];
     uint8_t *ptr = (uint8_t *)nRF24_TEST_ADDR;
-    uint8_t i = 5;
+    uint8_t i;
 
     nRF24_WriteBuf(nRF24_REG_TX_ADDR,ptr,5); // Write fake TX address
     nRF24_ReadBuf(nRF24_REG_TX_ADDR,rxbuf,5); // Read TX_ADDR register
@@ -195,12 +282,12 @@ void nRF24_SetRFChannel(uint8_t RFChannel) {
 
 // Flush nRF24L01 TX FIFO buffer
 void nRF24_FlushTX(void) {
-	nRF24_WriteReg(nRF24_CMD_FLUSH_TX,0xFF);
+    nRF24_WriteReg(nRF24_CMD_FLUSH_TX,0xFF);
 }
 
 // Flush nRF24L01 RX FIFO buffer
 void nRF24_FlushRX(void) {
-	nRF24_WriteReg(nRF24_CMD_FLUSH_RX,0xFF);
+    nRF24_WriteReg(nRF24_CMD_FLUSH_RX,0xFF);
 }
 
 // Put nRF24L01 in TX mode
@@ -290,14 +377,18 @@ nRF24_TX_PCKT_TypeDef nRF24_TXPacket(uint8_t * pBuf, uint8_t TX_PAYLOAD) {
     uint8_t status;
 
 #ifdef IRQ_POLL
-    uint32_t wait = nRF24_WAIT_TIMEOUT;
+    // Wait for an IRQ from the nRF24L01 through a GPIO polling
 
-    // This part is for simple wait for IRQ (polling the nRF24L01 IRQ pin)
+    uint16_t wait = nRF24_WAIT_TIMEOUT;
 
     // Release CE pin (in case if it still high)
     CE_L();
-    // Transmit data from the specified buffer to the TX FIFO
+    // Transfer data from specified buffer to the TX FIFO
+#ifdef SPI_USE_DMATX
+    nRF24_WriteBuf_DMA(nRF24_CMD_W_TX_PAYLOAD,pBuf,TX_PAYLOAD);
+#else
     nRF24_WriteBuf(nRF24_CMD_W_TX_PAYLOAD,pBuf,TX_PAYLOAD);
+#endif // SPI_USE_DMATX
     // CE pin high => Start transmit (must hold pin at least 10us)
     CE_H();
     // Wait for and IRQ from nRF24L01
@@ -306,14 +397,18 @@ nRF24_TX_PCKT_TypeDef nRF24_TXPacket(uint8_t * pBuf, uint8_t TX_PAYLOAD) {
     // Release CE pin
     CE_L();
 #else
-    // This part is for more power saving (waiting for nRF24L01 IRQ in sleep mode)
+    // Put MCU in sleep mode while waiting for IRQ from the nRF24L01
 
-    // Enable external interrupt
+    // Enable the EXTI1
     PC_CR2_bit.C21 = 1;
     // Release CE pin (in case if it still high)
     CE_L();
     // Transmit data from the specified buffer to the TX FIFO
+#ifdef SPI_USE_DMATX
+    nRF24_WriteBuf_DMA(nRF24_CMD_W_TX_PAYLOAD,pBuf,TX_PAYLOAD);
+#else
     nRF24_WriteBuf(nRF24_CMD_W_TX_PAYLOAD,pBuf,TX_PAYLOAD);
+#endif // SPI_USE_DMATX
     // CE pin high => Start transmit (must hold pin at least 10us)
     CE_H();
     // In theory there should be a WFE instruction instead of WFI, but according to the ST errata sheet
@@ -321,10 +416,8 @@ nRF24_TX_PCKT_TypeDef nRF24_TXPacket(uint8_t * pBuf, uint8_t TX_PAYLOAD) {
     // So WFI executed here and EXTI1 IRQ bit cleared in EXTI1_IRQHandler() procedure
     asm("WFI"); // Wait for the transmission ends (IRQ from nRF24L01)
     CE_L(); // Release CE pin (Standby-II -> Standby-I)
-    PC_CR2_bit.C21 = 0; // Disable external interrupt
-#endif
-
-    // Common part further...
+    PC_CR2_bit.C21 = 0; // Disable EXTI1
+#endif // IRQ_POLL
 
     // Read the status register
     status = nRF24_ReadReg(nRF24_REG_STATUS);
@@ -348,7 +441,7 @@ nRF24_TX_PCKT_TypeDef nRF24_TXPacket(uint8_t * pBuf, uint8_t TX_PAYLOAD) {
     return nRF24_TX_ERROR;
 }
 
-// Read data packet from the nRF24L01
+// Read received data packet from the nRF24L01
 // input:
 //   pBuf - buffer for received data
 //   RX_PAYLOAD - buffer size

@@ -2,6 +2,20 @@
 #ifndef __NRF24_H
 #define __NRF24_H
 
+
+////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+// If defined - use DMA to transfer data packet via SPI
+#define SPI_USE_DMATX
+
+// If defined wait for IRQ in polling mode, WFI otherwise
+//#define IRQ_POLL
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////
+
+
 // nRF24L01 data rate
 typedef enum {
     nRF24_DataRate_250kbps = (uint8_t)0x20, // 250kbps data rate
@@ -136,11 +150,14 @@ typedef enum {
 
 #define nRF24_TEST_ADDR         "nRF24"  // Fake address to test nRF24 presence
 
-#define nRF24_WAIT_TIMEOUT   0x000FFFFF  // Timeout counter
+#define nRF24_WAIT_TIMEOUT       0xFFFF  // Timeout counter
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////
 
 
 // Function prototypes
-void nRF24_init(void);
+void nRF24_Init(void);
 void nRF24_WriteReg(uint8_t reg, uint8_t value);
 uint8_t nRF24_ReadReg(uint8_t reg);
 uint8_t nRF24_Check(void);

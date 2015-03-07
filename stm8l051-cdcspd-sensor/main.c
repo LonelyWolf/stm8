@@ -74,7 +74,7 @@ volatile uint16_t cntr_EXTI4 = 0;
 volatile uint16_t tim2_diff = 0;
 volatile uint16_t tim3_diff = 0;
 
-// TIM# overwlows counter, a.k.a software timer
+// TIM# overflows counter
 volatile uint16_t tim2 = 0;
 volatile uint16_t tim3 = 0;
 volatile uint16_t tim4 = 0;
@@ -329,7 +329,7 @@ int main(void) {
     PC_CR1_bit.C10  = 1; // With Pull-up
     PC_CR2_bit.C20  = 0; // External interrupt disabled
 
-    // Configure RTC
+    // Configure the RTC
     LED_RED();
     if (RTC_Init() != RTC_OK) {
         // LSE not initialized
@@ -369,7 +369,7 @@ int main(void) {
     // PB6 - MOSI
     // PB7 - MISO
     // PC1 - IRQ
-    nRF24_init(); // Init SPI interface
+    nRF24_Init(); // Init SPI interface
     if (!nRF24_Check()) {
         // Some banana happens - no answer from nRF24L01+
         // Disable all the peripherials
@@ -399,8 +399,8 @@ int main(void) {
     }
 
     // Configure the nRF24L01+ in TX mode
-    nRF24_TXMode(0,                      // no auto retransmit
-                 0,                      // retransmit delay 250us
+    nRF24_TXMode(0,                      // auto retransmit disabled
+                 0,                      // retransmit delay 250us (ignored)
                  RF_CHANNEL,             // RF channel
                  nRF24_DataRate_250kbps, // data rate
                  nRF24_TXPower_6dBm,     // TX power
@@ -409,7 +409,6 @@ int main(void) {
                  nRF24_TX_Addr,          // TX address
                  nRF24_TX_Addr_Size      // TX address size
     );
-    nRF24_ClearIRQFlags();
 
     // Timers initialization
     CLK_PCKENR1_bit.PCKEN10 = 1; // Enable TIM2 peripherial
