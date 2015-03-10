@@ -3,20 +3,20 @@
 //////////////////////////
 
 
-#define SOFT_DEBOUNCE    // If defined - software debounce is used, no debounce otherwise
-#define TIM2LSE          // If defined - TIM2 will be clocked from LSE
-#define TIM3LSE          // If defined - TIM3 will be clocked from LSE
-
-
-///////////////////////////////////////////////////////////////////////////////
-
-
 #include <stdint.h>
 #include <iostm8l051f3.h>
 
 #include "main.h"
 #include "nRF24.h"
 #include "rtc.h"
+
+
+///////////////////////////////////////////////////////////////////////////////
+
+
+#define SOFT_DEBOUNCE    // If defined - software debounce is used, no debounce otherwise
+#define TIM2LSE          // If defined - TIM2 will be clocked from LSE
+#define TIM3LSE          // If defined - TIM3 will be clocked from LSE
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -30,6 +30,7 @@
 #define WU_TIMER             63  // Wakeup timer Period = (WU_TIMER + 1) * 0,015625 seconds (63 = 1 second)
 
 #define VREF_OFF_DUTY       600  // Internal voltage measure off-duty ratio
+#define VREF_COUNT           10  // How many measurements of Vrefint will be done
 
 #define START_BLINKS          3  // How many times the green LED will blink after reset
 #define REED_PASSES          40  // How many reed passes the LED will blink after reset
@@ -95,11 +96,14 @@ struct __packed {
 // Wakeup counter
 uint16_t cntr_wake = 0;
 
+// ADC measurements buffer
+uint16_t ADC_buf[VREF_COUNT];
+
 
 ///////////////////////////////////////////////////////////////////////////////
 
 
-// RTC_WAKEUP IRQ handle
+// RTC_WAKEUP IRQ handler
 #pragma vector=RTC_WAKEUP_vector
 __interrupt void RTC_IRQHandler(void) {
     CPU_CFG_GCR_bit.AL = 0; // Set main activation level
@@ -109,7 +113,7 @@ __interrupt void RTC_IRQHandler(void) {
     RTC_ISR2_bit.WUTF = 0; // Clear wakeup timer interrupt flag
 }
 
-// EXTI0 IRQ handle
+// EXTI0 IRQ handler
 #pragma vector=EXTI0_vector
 __interrupt void EXTI0_IRQHandler(void) {
     TIM2_CR1_bit.CEN = 1; // Enable TIM2 counter
@@ -136,7 +140,7 @@ __interrupt void EXTI0_IRQHandler(void) {
     EXTI_SR1_bit.P0F = 1; // Clear EXTI0 IRQ flag
 }
 
-// EXTI4 IRQ handle
+// EXTI4 IRQ handler
 #pragma vector=EXTI4_vector
 __interrupt void EXTI4_IRQHandler(void) {
     TIM3_CR1_bit.CEN = 1; // Enable TIM3 counter
@@ -163,7 +167,7 @@ __interrupt void EXTI4_IRQHandler(void) {
     EXTI_SR1_bit.P4F = 1; // Clear EXTI4 IRQ flag
 }
 
-// TIM2 Update/Overflow/Trigger/Break interrupt IRQ handle
+// TIM2 Update/Overflow/Trigger/Break interrupt IRQ handler
 #pragma vector=TIM2_OVR_UIF_vector
 __interrupt void TIM2_UIF_IRQHandler(void) {
     tim2++;
@@ -175,7 +179,7 @@ __interrupt void TIM2_UIF_IRQHandler(void) {
     TIM2_SR1_bit.UIF = 0; // Clear TIM2 update interrupt flag
 }
 
-// TIM3 Update/Overflow/Trigger/Break interrupt IRQ handle
+// TIM3 Update/Overflow/Trigger/Break interrupt IRQ handler
 #pragma vector=TIM3_OVR_UIF_vector
 __interrupt void TIM3_UIF_IRQHandler(void) {
     tim3++;
@@ -187,7 +191,7 @@ __interrupt void TIM3_UIF_IRQHandler(void) {
     TIM3_SR1_bit.UIF = 0; // Clear TIM3 update interrupt flag
 }
 
-// TIM4 Update interrupt IRQ handle
+// TIM4 Update interrupt IRQ handler
 #pragma vector=TIM4_UIF_vector
 __interrupt void TIM4_UIF_IRQHandler(void) {
     tim4++;
@@ -204,56 +208,152 @@ __interrupt void TIM4_UIF_IRQHandler(void) {
     }
 }
 
-// ADC1 end of conversion IRQ handle
+// ADC1 end of conversion IRQ handler
+// Actually, this handler should never be invoked, since ADC EOC is configured
+// as an event. But sometimes happens weird thing and without this handler
+// program falls to __iar_unhandled_exception()
 #pragma vector=ADC_EOC_vector
 __interrupt void ADC1_EOC_IRQHandler(void) {
     ADC1_SR_bit.EOC = 0; // Clear EOC flag (End Of Conversion)
+}
+
+// DMA1 channel 0 transfer complete IRQ handler
+#pragma vector=DMA1_CH0_TC_vector
+__interrupt void DMA1_CHANNEL0_1_IRQHandler(void) {
+    if (DMA1_GIR1_bit.IFC0) {
+        // Channel 0 interrupt
+        DMA1_C0SPR_bit.TCIF = 0; // Clear the TC interrupt flag
+        // Disable the DMA channel 0
+        DMA1_C0CR_bit.EN = 0;
+        // Disable the DMA1 peripheral clock (to save power)
+        CLK_PCKENR2_bit.PCKEN24 = 0;
+    }
 }
 
 
 ///////////////////////////////////////////////////////////////////////////////
 
 
-// Enable ADC and configure Vrefint channel
-// Must be some delay after this to stabilize ADC (Twkup = 3us)
+// Enable then ADC and Vrefint channel
+// note: there must be some delay after this to stabilize the ADC (Twkup = 3us)
 void ADC_Vrefint_Init(void) {
-    CLK_PCKENR2_bit.PCKEN20 = 1; // Enable ADC peripherial (PCKEN20)
-    ADC1_CR1_bit.ADON = 1; // Enable ADC
-    ADC1_CR1_bit.EOCIE = 1; // Enable EOC interrupt (End Of Conversion)
-    ADC1_TRIGR1_bit.VREFINTON = 1; // Enable internal reference voltage
-    ADC1_SQR1_bit.CHSEL_S28 = 1; // Enable CHSEL_SVREFINT fast ADC channel
-    ADC1_CR3 = 0x80; // Sampling time = 48 ADC clock cycles, disable analog watchdog channels
-    ADC1_SQR1_bit.DMAOFF = 1; // DMA off
+    // Enable the ADC peripherial (PCKEN20)
+    CLK_PCKENR2_bit.PCKEN20 = 1;
+    // Enable internal reference voltage
+    ADC1_TRIGR1_bit.VREFINTON = 1;
+    /*
+    // Configure the ADC
+    ADC1_CR1_bit.ADON  = 1; // Enable the ADC
+    ADC1_CR1_bit.CONT  = 1; // ADC continuous conversion
+    ADC1_CR3_bit.SMTP2 = 4; // Sampling time = 48 ADC clock cycles
+    ADC1_CR3_bit.CHSEL = 0; // Analog watchdog channels disabled
+    */
+    // Configure the ADC
+    //   - 12-bit resolution
+    //   - continuous conversion
+    //   - wake-up ADC
+    ADC1_CR1 = 0x05;
+    //   - ADC clock prescaler = CK
+    //   - External triggers disabled
+    //ADC1_CR2 = 0x00; // This is reset value, don't tuch this...
+    //   - Sampling time = 48 ADC clock cycles
+    //   - Analog watchdog channels disabled
+    ADC1_CR3 = 0x80;
+    /*
+    // Scan sequence:
+    ADC1_SQR1_bit.CHSEL_S28 = 1; // Vrefint channel
+    ADC1_SQR1_bit.DMAOFF    = 0; // DMA enabled
+    */
+    // Scan sequence:
+    //   - DMA enabled
+    //   - VREFINT channel
+    ADC1_SQR1 = 0x10;
+
+    // Enable the DMA1 peripheral clock (PCKEN24)
+    CLK_PCKENR2_bit.PCKEN24 = 1;
+
+    // No DMA timeout
+    //DMA1_GCSR_bit.TO = 0;
+
+    // Remap ADC1 DMA request/acknowledge to DMA1 channel 0
+    SYSCFG_RMPCR1_bit.ADC1DMA_REMAP = 0;
+
+    /*
+    // Configure the DMA channel 0 (DMA1_EOC)
+    DMA1_C0CR_bit.MINCDEC = 1; // Memory address increment
+    DMA1_C0CR_bit.CIRC    = 0; // Circular mode disabled
+    DMA1_C0CR_bit.DIR     = 0; // Peripheral to memory transfers
+    DMA1_C0CR_bit.HTIE    = 0; // Half-transaction interrupt disabled
+    DMA1_C0CR_bit.TCIE    = 1; // Transaction complete interrupt enabled
+    DMA1_C0CR_bit.EN      = 0; // Channel disabled
+    DMA1_C0SPR_bit.PL1    = 0; // Channel priority: medium
+    DMA1_C0SPR_bit.PL0    = 1;
+    DMA1_C0SPR_bit.TSIZE  = 1; // 16-bit transactions
+    DMA1_C0SPR_bit.HTIF   = 0; // Clear the HT flag
+    DMA1_C0SPR_bit.TCIF   = 0; // Clear the TC flag
+    */
+    // Configure the DMA channel 0 (DMA1_EOC)
+    //   - memory address increment
+    //   - normal buffer mode
+    //   - peripheral to memory transfers
+    //   - transaction complete interrupt enabled
+    //   - channel disabled
+    DMA1_C0CR   = 0x22;
+    //   - medium channel priority
+    //   - 16-bit transactions
+    //   - clear the TC and HT flags
+    DMA1_C0SPR  = 0x18;
+    // ADC1 data register high byte address
+    DMA1_C0PARH = (uint8_t)((uint16_t)(&ADC1_DRH) >> 8);
+    DMA1_C0PARL = (uint8_t)((uint16_t)(&ADC1_DRH) & 0xFF);
+
+    // Global enable of the DMA channels
+    DMA1_GCSR_bit.GEN = 1;
 }
 
 // Measure Vrefint
-uint16_t ADC_Vrefint_Measure(uint8_t count) {
-    uint16_t adc_res;
-    uint16_t value = 0;
-    uint8_t cntr;
+uint16_t ADC_Vrefint_Measure(void) {
+    uint8_t i;
+    uint16_t result;
 
-    // Measure voltage "count" times and calculate rough average value
-    for (cntr = 1; cntr < count; cntr++) {
-        ADC1_CR1_bit.START = 1; // Start ADC conversion, by software trigger
-        // In theory there should be a WFE instruction instead of WFI, but according to the ST errata sheet
-        // my be "incorrect code execution when WFE instruction is interrupted by ISR or event"
-        // So WFI executed here and EOC IRQ bit cleared in ADC1_EOC_IRQHandler() procedure
-        asm("WFI"); // Wait for the conversion ends
-        adc_res  = (ADC1_DRH << 8); // Get ADC converted data
-        adc_res |=  ADC1_DRL;
-        value += adc_res;
-        if (cntr) value >>= 1;
+    // Memory buffer address
+    DMA1_C0M0ARH = (uint8_t)((uint16_t)ADC_buf >> 8);
+    DMA1_C0M0ARL = (uint8_t)((uint16_t)ADC_buf & 0xFF);
+    // Number of the DMA transactions
+    DMA1_C0NDTR = VREF_COUNT;
+    // Enable the DMA1 channel 0
+    DMA1_C0CR_bit.EN = 1;
+
+    // Start ADC conversion in continuous mode by software trigger
+    ADC1_CR1_bit.START = 1;
+    // In theory there should be a WFE instruction instead of WFI, but according to the ST errata sheet
+    // my be "incorrect code execution when WFE instruction is interrupted by ISR or event"
+    // So WFI executed here and IRQ bit is cleared in DMA1_CHANNEL0_1_IRQHandler() procedure
+    // Repeatedly put the MCU into a sleep mode while the DMA channel is enabled
+    // This loop made to ensure what the MCU will sleep all the time while the DMA is working, beacuse
+    // EXTI or RTC interrupt can wake it earlier
+    do {
+        asm("WFI");
+    } while (DMA1_C0CR_bit.EN);
+
+    // Calculate rough average of ADC values
+    result = ADC_buf[0];
+    for (i = 1; i < VREF_COUNT; i++) {
+        result += ADC_buf[i];
+        result >>= 1;
     }
 
-    return value;
+    return result;
 }
 
-// Disable Vrefint ADC channel and ADC module
+// Disable the Vrefint channel and the ADC peripheral
 void ADC_Vrefint_Disable() {
-    ADC1_TRIGR1_bit.VREFINTON = 0; // Disable internal reference voltage
-    ADC1_SQR1_bit.CHSEL_S28 = 0; // Disable CHSEL_SVREFINT fast ADC channel
-    ADC1_CR1_bit.ADON = 0; // Disable ADC
-    CLK_PCKENR2_bit.PCKEN20 = 0; // Disable ADC peripherial
+    // Disable the internal reference voltage
+    ADC1_TRIGR1_bit.VREFINTON = 0;
+    // Put the ADC in power-down mode
+    ADC1_CR1_bit.ADON = 0;
+    // Disable the ADC peripherial clock
+    CLK_PCKENR2_bit.PCKEN20 = 0;
 }
 
 // CRC8-CCITT calculation for buffer (polynomial: x^8 + x^2 + x + 1 (0xE0))
@@ -332,8 +432,8 @@ int main(void) {
     // Configure the RTC
     LED_RED();
     if (RTC_Init() != RTC_OK) {
-        // LSE not initialized
-        // Put MCU in HALT mode to prevent battery drain
+        // LSE not initialized --> there is no sense to continue
+        // Put the MCU in HALT mode to prevent battery drain
         LED_OFF();
         // Disable all the peripherials
         CLK_PCKENR1 = 0;
@@ -357,7 +457,7 @@ int main(void) {
         factory_vref = 0x0687;
     }
     ADC_Vrefint_Init();
-    vrefint = ADC_Vrefint_Measure(10);
+    vrefint = ADC_Vrefint_Measure();
     ADC_Vrefint_Disable();
     vrefint = (((uint32_t)factory_vref * 300) / vrefint);
     if (vrefint > 1023) vrefint = 1023;
@@ -371,7 +471,8 @@ int main(void) {
     // PC1 - IRQ
     nRF24_Init(); // Init SPI interface
     if (!nRF24_Check()) {
-        // Some banana happens - no answer from nRF24L01+
+        // No answer from the nRF24L01 --> some banana happens
+        // There is no sense to continue, blink LED to indicate troubles
         // Disable all the peripherials
         CLK_PCKENR1 = 0;
         CLK_PCKENR2 = 0;
@@ -457,11 +558,16 @@ int main(void) {
     ITC_SPR3_bit.VECT9SPR  = 0x00; // EXTI1 IRQ level 2 (below high priority) (EXTI1 IRQ = Vector 9)
     asm("RIM"); // Enable global interrupts (enable priorities)
 
-    // Configure system clock
-    CLK_CKDIVR_bit.CKM = 0x07; // System clock source /128 (125kHz from HSI)
+    // Configure the system clock
+//    CLK_CKDIVR_bit.CKM = 7; // System clock source /128 (125kHz from HSI)
+//    CLK_CKDIVR_bit.CKM = 1; // System clock source /2 (8MHz from HSI)
+    CLK_CKDIVR_bit.CKM = 0; // System clock source /1 (16MHz from HSI)
 
     // Configure FLASH power savings
     FLASH_CR1_bit.WAITM = 1; // Flash program and data EEPROM in IDDQ during wait modes
+
+    // Enable automatic switch off the internal voltage reference
+    PWR_CSR2_bit.ULP = 1;
 
     // Check for low voltage and blink the LED if it below 2.3V
     if (vrefint < 230) {
@@ -506,7 +612,7 @@ int main(void) {
         // Measure supply voltage
         if (!(cntr_wake % VREF_OFF_DUTY)) {
             ADC_Vrefint_Init();
-            vrefint = ADC_Vrefint_Measure(10);
+            vrefint = ADC_Vrefint_Measure();
             ADC_Vrefint_Disable();
             vrefint = (((uint32_t)factory_vref * 300) / vrefint);
             if (vrefint > 1023) vrefint = 1023;
