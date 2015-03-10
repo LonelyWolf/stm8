@@ -246,7 +246,12 @@ void nRF24_WriteBuf_DMA(uint8_t reg, uint8_t *pBuf, uint8_t count) {
     // In theory there should be a WFE instruction instead of WFI, but according to the ST errata sheet
     // my be "incorrect code execution when WFE instruction is interrupted by ISR or event"
     // So WFI executed here and DMA1 channel 2 TC IRQ bit cleared in DMA1_CHANNEL2_3_IRQHandler() procedure
-    asm("WFI"); // Wait for the DMA transactions complete
+    // Repeatedly put the MCU into a sleep mode while counter of DMA transactions is not zero
+    // This loop made to ensure what the MCU will sleep all the time while the DMA is working, beacuse
+    // EXTI or RTC interrupt can wake it earlier
+    do {
+        asm("WFI");
+    } while (DMA1_C2NDTR > 0);
     while (!(SPI1_SR_bit.TXE)); // Wait until TX buffer is empty
     while (SPI1_SR_bit.BSY); // Wait until the transmission is complete
     DMA1_C2CR_bit.EN = 0; // Disable the DMA channel 2
