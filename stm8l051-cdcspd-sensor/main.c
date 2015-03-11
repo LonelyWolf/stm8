@@ -622,7 +622,7 @@ int main(void) {
         payload.cntr_SPD  = cntr_EXTI4;
         payload.tim_SPD   = tim3_diff;
         payload.tim_CDC   = tim2_diff;
-        payload.vrefint   = vrefint & 0x0300; // Save bits [7..2] for future use
+        payload.vrefint   = vrefint & 0x03FF; // Save bits [7..2] for future use
         payload.cntr_wake = cntr_wake;
         payload.CRC8      = CRC8_CCITT((uint8_t *)&payload,sizeof(payload) - 1);
 
