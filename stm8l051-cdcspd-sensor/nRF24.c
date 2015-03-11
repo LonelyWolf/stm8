@@ -104,30 +104,42 @@ void nRF24_Init() {
     PC_CR1_bit.C11  = 1; // Pull-up
     PC_CR2_bit.C21  = 0; // Disable external interrupt
 
-    // Configure SPI
-    CLK_PCKENR1_bit.PCKEN14 = 1; // Enable SPI peripheral (PCKEN14)
+    // Enable the SPI peripheral
+    CLK_PCKENR1_bit.PCKEN14 = 1;
 
     /*
-    SPI1_CR1_bit.BR       = 0; // Baud = f/2 (1MHz at 2MHz CPU)
+    // Configure the SPI
+    SPI1_CR1_bit.BR       = 0; // Baud = Fsysclk/2
     SPI1_CR1_bit.CPHA     = 0; // CPHA = 1st edge
     SPI1_CR1_bit.CPOL     = 0; // CPOL = low (SCK low when idle)
     SPI1_CR1_bit.LSBFIRST = 0; // first bit is MSB
     SPI1_CR1_bit.MSTR     = 1; // Master configuration
     SPI1_CR1_bit.SPE      = 0; // Peripheral enabled
-    */
-    SPI1_CR1 = 0x04; // SPI: MSB first, Baud=f/2, Master, CPOL=low, CPHA=1st edge
 
-    /*
-    SPI1_CR2_bit.BDM    = 0; // 2-line unidirectional data mode
-    SPI1_CR2_bit.BD0E   = 0; // don't care when BDM set to 0
-    SPI1_CR2_bit.RXOnly = 0; // Full duplex
-    SPI1_CR2_bit.SSI    = 1; // Master mode
-    SPI1_CR2_bit.SSM    = 1; // Software slave management enabled
-    SPI1_CR2_bit.CRCEN  = 0; // CRC disabled
+    SPI1_CR2_bit.BDM     = 0; // 2-line unidirectional data mode
+    SPI1_CR2_bit.BD0E    = 0; // don't care when BDM set to 0
+    SPI1_CR2_bit.CRCEN   = 0; // CRC disabled
+    SPI1_CR2_bit.CRCNEXT = 0;
+    SPI1_CR2_bit.RXOnly  = 0; // Full duplex
+    SPI1_CR2_bit.SSM     = 1; // Software slave management enabled
+    SPI1_CR2_bit.SSI     = 1; // Master mode
     */
-    SPI1_CR2 = 0x03; // SPI: 2-line mode, full duplex, SSM on (master mode), no CRC
 
-    SPI1_CR1_bit.SPE = 1; // SPI peripheral enabled
+    // Configure the SPI
+    //   - MSB first
+    //   - Baud = Fsysclk/2
+    //   - Master mode
+    //   - CPOL = low
+    //   - CPHA = 1st edge
+    SPI1_CR1 = 0x04;
+    //   - 2-line unidirectional data mode
+    //   - full duplex
+    //   - software slave management enabled
+    //   - CRC generation disabled
+    SPI1_CR2 = 0x03;
+
+    // SPI enabled
+    SPI1_CR1_bit.SPE = 1;
 
     CSN_H();
     CE_L(); // CE pin low -> power down mode at startup
@@ -135,7 +147,7 @@ void nRF24_Init() {
     nRF24_ClearIRQFlags();
 
 #ifdef SPI_USE_DMATX
-    // Initialize the DMA peripheral
+    // Initialize the DMA peripheral and DMA SPI TX channel
     SPI1_InitDMA();
 #endif
 }
