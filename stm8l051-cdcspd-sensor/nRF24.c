@@ -22,12 +22,14 @@ const uint8_t RX_ADDR_PIPES[6] = {
     nRF24_REG_RX_ADDR_P5
 };
 
-
 #ifndef IRQ_POLL
 // EXTI1 IRQ handle
 #pragma vector=EXTI1_vector
 __interrupt void EXTI1_IRQHandler(void) {
-    EXTI_SR1_bit.P1F = 1; // Clear the EXTI1 IRQ flag
+    // Disable EXTI1
+    PC_CR2_bit.C21 = 0;
+    // Clear the EXTI1 IRQ flag
+    EXTI_SR1_bit.P1F = 1;
 }
 #endif
 
@@ -35,9 +37,10 @@ __interrupt void EXTI1_IRQHandler(void) {
 // DMA1 channel 2 transfer complete IRQ handle
 #pragma vector=DMA1_CH2_TC_vector
 __interrupt void DMA1_CHANNEL2_3_IRQHandler(void) {
+    // Channel 2 interrupt
     if (DMA1_GIR1_bit.IFC2) {
-        // Channel 2 interrupt
-        DMA1_C2SPR_bit.TCIF = 0; // Clear the TC interrupt flag
+        // Clear the TC interrupt flag
+        DMA1_C2SPR_bit.TCIF = 0;
     }
 }
 
@@ -82,7 +85,7 @@ void SPI1_InitDMA(void) {
 
 // GPIO and SPI initialization
 void nRF24_Init() {
-    // IRQ  --> PC1
+    // IRQ  --> PC0
     // CE   <-- PB3
     // CSN  <-- PB4
     // SCK  <-- PB5
@@ -99,9 +102,16 @@ void nRF24_Init() {
     PB_CR1_bit.C17  = 1; // Pull-up
     PB_CR2_bit.C27  = 0; // Disable external interrupt
 
+/*
+    // IRQ pin (PC0) set as input with pull-up
+    PC_DDR_bit.DDR0 = 0; // Input
+    PC_CR1_bit.C10  = 0; // No pull-up
+    PC_CR2_bit.C20  = 0; // Disable external interrupt
+*/
+
     // IRQ pin (PC1) set as input with pull-up
     PC_DDR_bit.DDR1 = 0; // Input
-    PC_CR1_bit.C11  = 1; // Pull-up
+    PC_CR1_bit.C11  = 0; // No pull-up
     PC_CR2_bit.C21  = 0; // Disable external interrupt
 
     // Enable the SPI peripheral
@@ -118,7 +128,7 @@ void nRF24_Init() {
 
     SPI1_CR2_bit.BDM     = 0; // 2-line unidirectional data mode
     SPI1_CR2_bit.BD0E    = 0; // don't care when BDM set to 0
-    SPI1_CR2_bit.CRCEN   = 0; // CRC disabled
+    SPI1_CR2_bit.CRCEN   = 1; // CRC enabled
     SPI1_CR2_bit.CRCNEXT = 0;
     SPI1_CR2_bit.RXOnly  = 0; // Full duplex
     SPI1_CR2_bit.SSM     = 1; // Software slave management enabled
@@ -135,8 +145,11 @@ void nRF24_Init() {
     //   - 2-line unidirectional data mode
     //   - full duplex
     //   - software slave management enabled
-    //   - CRC generation disabled
-    SPI1_CR2 = 0x03;
+    //   - CRC generation enabled
+    SPI1_CR2 = 0x23;
+
+    // SPI CRC polynominal value
+    SPI1_CRCPR = 0x07;
 
     // SPI enabled
     SPI1_CR1_bit.SPE = 1;
@@ -239,6 +252,37 @@ void nRF24_WriteBuf(uint8_t reg, uint8_t *pBuf, uint8_t count) {
     CSN_H();
 }
 
+// Send data buffer to the nRF24L01 with hardware CRC calculation
+// This procedure will send the content of the data buffer with it CRC byte at end
+// input:
+//   reg - register number
+//   pBuf - pointer to the data buffer
+//   count - number of bytes to send
+void nRF24_WriteBuf_CRC(uint8_t reg, uint8_t *pBuf, uint8_t count) {
+    CSN_L();
+    SPI1_SendRecv(nRF24_CMD_WREG | reg); // Send buffer address
+    // Disable the SPI CRC calculation and then enable it back to reset the CRC register
+    // CRCEN bit can be modified only when the SPI peripheral is disabled
+    SPI1_CR1_bit.SPE = 0;
+    SPI1_CR2_bit.CRCEN = 0;
+    SPI1_CR2_bit.CRCEN = 1;
+    SPI1_CR1_bit.SPE = 1;
+    // Transmit first byte (clears the TXE the flag)
+    SPI1_DR = *pBuf++;
+    while (--count) {
+        while (!(SPI1_SR_bit.TXE)); // Wait until TX buffer is empty
+        if (SPI1_SR_bit.RXNE) while (!(SPI1_SR_bit.RXNE)); // Wait while RX buffer is empty
+        (void)SPI1_DR; // Clear the RXNE flag
+        SPI1_DR = *pBuf++; // Transmit byte
+        if (count == 1) SPI1_CR2_bit.CRCNEXT = 1; // Next transfer will be a CRC byte
+    }
+    if (SPI1_SR_bit.RXNE) while (!(SPI1_SR_bit.RXNE)); // Wait while RX buffer is empty
+    (void)SPI1_DR; // Clear the RXNE flag
+    while (!(SPI1_SR_bit.TXE)); // Wait until TX buffer is empty
+    while (SPI1_SR_bit.BSY); // Wait until the transmission is complete
+    CSN_H();
+}
+
 #ifdef SPI_USE_DMATX
 // Send data buffer to the nRF24L01 (using DMA)
 // input:
@@ -249,12 +293,21 @@ void nRF24_WriteBuf(uint8_t reg, uint8_t *pBuf, uint8_t count) {
 void nRF24_WriteBuf_DMA(uint8_t reg, uint8_t *pBuf, uint8_t count) {
     CSN_L();
     SPI1_SendRecv(nRF24_CMD_WREG | reg); // Send buffer address
+
+    // Disable the SPI CRC calculation and then enable it back to reset the CRC register
+    // CRCEN bit can be modified only when the SPI peripheral is disabled
+    SPI1_CR1_bit.SPE = 0;
+    SPI1_CR2_bit.CRCEN = 0;
+    SPI1_CR2_bit.CRCEN = 1;
+    SPI1_CR1_bit.SPE = 1;
+
     SPI1_ICR_bit.TXDMAEN = 1; // SPI TX buffer DMA enable
     CLK_PCKENR2_bit.PCKEN24 = 1; // Enable the DMA1 peripheral clock (PCKEN24)
     DMA1_C2M0ARH = (uint8_t)((uint16_t)pBuf >> 8); // DMA1 channel 2 memory address
     DMA1_C2M0ARL = (uint8_t)((uint16_t)pBuf & 0xFF);
     DMA1_C2NDTR = count; // DMA transactions count
     DMA1_C2CR_bit.EN = 1; // Enable the DMA1 channel 2
+
     // In theory there should be a WFE instruction instead of WFI, but according to the ST errata sheet
     // my be "incorrect code execution when WFE instruction is interrupted by ISR or event"
     // So WFI executed here and DMA1 channel 2 TC IRQ bit cleared in DMA1_CHANNEL2_3_IRQHandler() procedure
@@ -392,11 +445,12 @@ void nRF24_RXMode(nRF24_RX_PIPE_TypeDef PIPE, nRF24_ENAA_TypeDef PIPE_AA, uint8_
 //   nRF24_TX_XXX values
 nRF24_TX_PCKT_TypeDef nRF24_TXPacket(uint8_t * pBuf, uint8_t TX_PAYLOAD) {
     uint8_t status;
+    uint16_t wait;
 
 #ifdef IRQ_POLL
     // Wait for an IRQ from the nRF24L01 through a GPIO polling
 
-    uint16_t wait = nRF24_WAIT_TIMEOUT;
+    wait = nRF24_WAIT_TIMEOUT;
 
     // Release CE pin (in case if it still high)
     CE_L();
@@ -404,17 +458,20 @@ nRF24_TX_PCKT_TypeDef nRF24_TXPacket(uint8_t * pBuf, uint8_t TX_PAYLOAD) {
 #ifdef SPI_USE_DMATX
     nRF24_WriteBuf_DMA(nRF24_CMD_W_TX_PAYLOAD,pBuf,TX_PAYLOAD);
 #else
-    nRF24_WriteBuf(nRF24_CMD_W_TX_PAYLOAD,pBuf,TX_PAYLOAD);
+    nRF24_WriteBuf_CRC(nRF24_CMD_W_TX_PAYLOAD,pBuf,TX_PAYLOAD);
 #endif // SPI_USE_DMATX
     // CE pin high => Start transmit (must hold pin at least 10us)
     CE_H();
-    // Wait for and IRQ from nRF24L01
-    while(PC_IDR_bit.IDR1 && --wait); // Wait for IRQ from nRF24L01
-    if (!wait) return nRF24_TX_TIMEOUT;
+    // Wait for IRQ from nRF24L01
+    while (PC_IDR_bit.IDR1 && --wait);
     // Release CE pin
     CE_L();
-#else
+    // Timeout?
+    if (!wait) return nRF24_TX_TIMEOUT;
+#else // IRQ_POLL
     // Put MCU in sleep mode while waiting for IRQ from the nRF24L01
+
+    wait = 10;
 
     // Enable the EXTI1
     PC_CR2_bit.C21 = 1;
@@ -424,16 +481,20 @@ nRF24_TX_PCKT_TypeDef nRF24_TXPacket(uint8_t * pBuf, uint8_t TX_PAYLOAD) {
 #ifdef SPI_USE_DMATX
     nRF24_WriteBuf_DMA(nRF24_CMD_W_TX_PAYLOAD,pBuf,TX_PAYLOAD);
 #else
-    nRF24_WriteBuf(nRF24_CMD_W_TX_PAYLOAD,pBuf,TX_PAYLOAD);
+    nRF24_WriteBuf_CRC(nRF24_CMD_W_TX_PAYLOAD,pBuf,TX_PAYLOAD);
 #endif // SPI_USE_DMATX
     // CE pin high => Start transmit (must hold pin at least 10us)
     CE_H();
     // In theory there should be a WFE instruction instead of WFI, but according to the ST errata sheet
     // my be "incorrect code execution when WFE instruction is interrupted by ISR or event"
     // So WFI executed here and EXTI1 IRQ bit cleared in EXTI1_IRQHandler() procedure
-    asm("WFI"); // Wait for the transmission ends (IRQ from nRF24L01)
-    CE_L(); // Release CE pin (Standby-II -> Standby-I)
-    PC_CR2_bit.C21 = 0; // Disable EXTI1
+    while (PC_IDR_bit.IDR1 && --wait) asm("WFI"); // Wait for IRQ from nRF24L01
+    // Release CE pin (Standby-II -> Standby-I)
+    CE_L();
+    // Disable EXTI1
+    PC_CR2_bit.C21 = 0;
+    // Timeout?
+    if (!wait) return nRF24_TX_TIMEOUT;
 #endif // IRQ_POLL
 
     // Read the status register

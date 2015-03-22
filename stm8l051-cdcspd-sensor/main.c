@@ -53,13 +53,6 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 
-// ADC EOC IRQ vector (not present in standard IAR lib)
-#define ADC_EOC_vector                       0x14
-
-
-///////////////////////////////////////////////////////////////////////////////
-
-
 uint8_t i; // Really need to comment this?
 
 // Last measured internal voltage
@@ -90,7 +83,6 @@ struct __packed {
     uint16_t tim_CDC;   // CDC interval
     uint16_t vrefint;   // Measured voltage
     uint16_t cntr_wake; // Wake counter
-    uint8_t  CRC8;      // CRC8 of this packet
 } payload;
 
 // Wakeup counter
@@ -208,21 +200,15 @@ __interrupt void TIM4_UIF_IRQHandler(void) {
     }
 }
 
-// ADC1 end of conversion IRQ handler
-// Actually, this handler should never be invoked, since ADC EOC is configured
-// as an event. But sometimes happens weird thing and without this handler
-// program falls to __iar_unhandled_exception()
-#pragma vector=ADC_EOC_vector
-__interrupt void ADC1_EOC_IRQHandler(void) {
-    ADC1_SR_bit.EOC = 0; // Clear EOC flag (End Of Conversion)
-}
-
 // DMA1 channel 0 transfer complete IRQ handler
 #pragma vector=DMA1_CH0_TC_vector
 __interrupt void DMA1_CHANNEL0_1_IRQHandler(void) {
+    // Channel 0 interrupt
     if (DMA1_GIR1_bit.IFC0) {
-        // Channel 0 interrupt
-        DMA1_C0SPR_bit.TCIF = 0; // Clear the TC interrupt flag
+        // Set main activation level
+        CPU_CFG_GCR_bit.AL = 0;
+        // Clear the TC interrupt flag
+        DMA1_C0SPR_bit.TCIF = 0;
         // Disable the DMA channel 0
         DMA1_C0CR_bit.EN = 0;
         // Disable the DMA1 peripheral clock (to save power)
@@ -324,6 +310,9 @@ uint16_t ADC_Vrefint_Measure(void) {
     // Enable the DMA1 channel 0
     DMA1_C0CR_bit.EN = 1;
 
+    // Wait until Vrefint becomes stable
+    while (!PWR_CSR2_bit.VREFINTF);
+
     // Start ADC conversion in continuous mode by software trigger
     ADC1_CR1_bit.START = 1;
     // In theory there should be a WFE instruction instead of WFI, but according to the ST errata sheet
@@ -347,7 +336,7 @@ uint16_t ADC_Vrefint_Measure(void) {
 }
 
 // Disable the Vrefint channel and the ADC peripheral
-void ADC_Vrefint_Disable() {
+void ADC_Vrefint_Disable(void) {
     // Disable the internal reference voltage
     ADC1_TRIGR1_bit.VREFINTON = 0;
     // Put the ADC in power-down mode
@@ -356,32 +345,16 @@ void ADC_Vrefint_Disable() {
     CLK_PCKENR2_bit.PCKEN20 = 0;
 }
 
-// CRC8-CCITT calculation for buffer (polynomial: x^8 + x^2 + x + 1 (0xE0))
-// input:
-//   buf - pointer to the buffer to calc CRC
-//   len - length of the buffer (bytes)
-// return: CRC8 of the buffer
-uint8_t CRC8_CCITT(uint8_t *buf, uint8_t len) {
-    uint8_t i;
-    uint8_t data = 0;
-
-    while (len--) {
-        data ^= *buf++;
-        for (i = 0; i < 8; i++ ) {
-            if (data & 0x80) data ^= 0x07;
-            data <<= 1;
-        }
-    }
-
-    return data;
-}
-
 
 ///////////////////////////////////////////////////////////////////////////////
 
 
 int main(void) {
-    CLK_PCKENR2_bit.PCKEN27 = 0; // Disable Boot ROM
+    // Disable the Boot ROM
+    CLK_PCKENR2_bit.PCKEN27 = 0;
+
+    // Disable global interrupts (level 3 set)
+    asm("SIM");
 
     // LED pins (PB1, PB2)
     PB_DDR_bit.DDR1 = 1; // Set PB1 as output
@@ -407,17 +380,21 @@ int main(void) {
     PC_CR1_bit.C14  = 0; // Floating input (external pull-up resistor)
     PC_CR2_bit.C24  = 1; // Enable external interrupt
 
+    // nRF24L01 power enable (PA2)
+    PA_ODR_bit.ODR2 = 0; // Latch "0" in output register
+    PA_DDR_bit.DDR2 = 1; // Output
+    PA_CR1_bit.C12  = 1; // Push-pull
+    PA_CR2_bit.C22  = 0; // 2MHz output speed
+
+    // Enable power for the nRF24L01 (power-on reset 100ms)
+    PA_ODR_bit.ODR2 = 1;
+
     // Configure unused GPIO ports as input with pull-up for powersaving
     // PD0
     PD_ODR_bit.ODR0 = 0; // Latch "0" in output register
     PD_DDR_bit.DDR0 = 0; // Input
     PD_CR1_bit.C10  = 1; // With Pull-up
     PD_CR2_bit.C20  = 0; // External interrupt disabled
-    // PA2
-    PA_ODR_bit.ODR2 = 0; // Latch "0" in output register
-    PA_DDR_bit.DDR2 = 0; // Input
-    PA_CR1_bit.C12  = 1; // With Pull-up
-    PA_CR2_bit.C22  = 0; // External interrupt disabled
     // PA3
     PA_ODR_bit.ODR3 = 0; // Latch "0" in output register
     PA_DDR_bit.DDR3 = 0; // Input
@@ -434,17 +411,27 @@ int main(void) {
     if (RTC_Init() != RTC_OK) {
         // LSE not initialized --> there is no sense to continue
         // Put the MCU in HALT mode to prevent battery drain
+
+        // Power-off the LED
         LED_OFF();
+
         // Disable all the peripherials
         CLK_PCKENR1 = 0;
         CLK_PCKENR2 = 0;
         CLK_PCKENR3 = 0;
+
         // Disable the magnetic reed pins external interrupts
         PB_CR2_bit.C20 = 0;
         PB_CR2_bit.C21 = 0;
-        // Disable nRF24L01 IRQ pin external interrupt
+
+        // Disable the nRF24L01 IRQ pin external interrupt
         PC_CR2_bit.C21 = 0;
-        asm("HALT");
+
+        // Swith-off power for the nRF24L01
+        PA_ODR_bit.ODR2 = 0;
+
+        // Halt until reset
+        while(1) asm("HALT");
     }
     RTC_WakeupConfig(RTC_WUC_RTCCLK_Div16); // RTC wakeup clock = LSE/RTCDIV/16
     RTC_WakeupIT(ENABLE); // Enable wakeup interrupt
@@ -473,16 +460,17 @@ int main(void) {
     if (!nRF24_Check()) {
         // No answer from the nRF24L01 --> some banana happens
         // There is no sense to continue, blink LED to indicate troubles
-        // Disable all the peripherials
-        CLK_PCKENR1 = 0;
-        CLK_PCKENR2 = 0;
-        CLK_PCKENR3 = 0;
+
         // Disable the magnetic reed pins external interrupts
         PB_CR2_bit.C20 = 0;
         PB_CR2_bit.C21 = 0;
+
         // Disable nRF24L01 IRQ pin external interrupt
         PC_CR2_bit.C21 = 0;
-        CLK_PCKENR2_bit.PCKEN22 = 1; // Enable RTC peripherial (PCKEN22)
+
+        // Swith-off power for the nRF24L01
+        PA_ODR_bit.ODR2 = 0;
+
         // Blink red LED four times to indicate what some banana happens
         RTC_WakeupSet(ENABLE);
         for(i = 0; i < 4; i++) {
@@ -493,15 +481,22 @@ int main(void) {
             RTC_WakeupTimerSet(WU_TIMER / 2); // half second off time
             asm("HALT");
         }
-        // Halt until reset
+
+        // Disable the RTC wake-up
         RTC_WakeupSet(DISABLE);
+
+        // Disable all the peripherials
+        CLK_PCKENR1 = 0;
         CLK_PCKENR2 = 0;
+        CLK_PCKENR3 = 0;
+
+        // Halt until reset
         while(1) asm("HALT");
     }
 
     // Configure the nRF24L01+ in TX mode
     nRF24_TXMode(0,                      // auto retransmit disabled
-                 0,                      // retransmit delay 250us (ignored)
+                 7,                      // retransmit delay 2000us ((7+1)*250us) (ignored)
                  RF_CHANNEL,             // RF channel
                  nRF24_DataRate_250kbps, // data rate
                  nRF24_TXPower_6dBm,     // TX power
@@ -560,8 +555,8 @@ int main(void) {
 
     // Configure the system clock
 //    CLK_CKDIVR_bit.CKM = 7; // System clock source /128 (125kHz from HSI)
-//    CLK_CKDIVR_bit.CKM = 1; // System clock source /2 (8MHz from HSI)
-    CLK_CKDIVR_bit.CKM = 0; // System clock source /1 (16MHz from HSI)
+    CLK_CKDIVR_bit.CKM = 1; // System clock source /2 (8MHz from HSI)
+//    CLK_CKDIVR_bit.CKM = 0; // System clock source /1 (16MHz from HSI)
 
     // Configure FLASH power savings
     FLASH_CR1_bit.WAITM = 1; // Flash program and data EEPROM in IDDQ during wait modes
@@ -602,11 +597,6 @@ int main(void) {
 
     // Main loop ^_^
     while(1) {
-        // Wake nRF24L01 (Power Down -> Standby-I mode)
-        // This will take about 1.5ms with internal nRF24L01 oscillator or 150us with external.
-        // Delay here is unnecessary since nRF24L01 uses external oscillator.
-        nRF24_Wake();
-
         cntr_wake++; // Count wakeups
 
         // Measure supply voltage
@@ -618,19 +608,29 @@ int main(void) {
             if (vrefint > 1023) vrefint = 1023;
         }
 
+        // Enable the SPI1 peripheral clock (to communicate with nRF24L01)
+        CLK_PCKENR1_bit.PCKEN14 = 1;
+
+        // Wake nRF24L01 (Power Down -> Standby-I mode)
+        // This will take about 1.5ms with internal nRF24L01 oscillator or 150us with external.
+        // Delay here is unnecessary since nRF24L01 uses external oscillator.
+        nRF24_Wake();
+
         // Prepare data packet for nRF24L01
         payload.cntr_SPD  = cntr_EXTI4;
         payload.tim_SPD   = tim3_diff;
         payload.tim_CDC   = tim2_diff;
-        payload.vrefint   = vrefint & 0x03FF; // Save bits [7..2] for future use
+        payload.vrefint   = vrefint & 0x03FF; // Save bits [15..10] for future use
         payload.cntr_wake = cntr_wake;
-        payload.CRC8      = CRC8_CCITT((uint8_t *)&payload,sizeof(payload) - 1);
 
         // Send data packet
         nRF24_TXPacket((uint8_t *)&payload,sizeof(payload));
 
         // Standby-I -> Power down
         nRF24_PowerDown();
+
+        // Disable the SPI1 peripheral clock (to save power)
+        CLK_PCKENR1_bit.PCKEN14 = 0;
 
         if (TIM2_CR1_bit.CEN || TIM3_CR1_bit.CEN) {
             CPU_CFG_GCR_bit.AL = 1; // Set interrupt-only activation level

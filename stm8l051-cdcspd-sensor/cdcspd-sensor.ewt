@@ -20,6 +20,9 @@
     <name>$PROJ_DIR$\main.c</name>
   </file>
   <file>
+    <name>$PROJ_DIR$\main.h</name>
+  </file>
+  <file>
     <name>$PROJ_DIR$\nRF24.c</name>
   </file>
   <file>
